@@ -10,6 +10,7 @@ import SearchPage from './pages/Search'
 import Controllers from './pages/Controllers'
 import Emulators from './pages/Emulators'
 import BigPicture from './pages/BigPicture'
+import Catalog from './pages/Catalog'
 import ShortcutsOverlay from './components/ShortcutsOverlay'
 import LaunchFailureToast from './components/LaunchFailureToast'
 import { useLibraryStore } from './store/library'
@@ -77,6 +78,7 @@ export default function App(): JSX.Element {
                     <Route path="search" element={<SearchPage />} />
                     <Route path="controllers" element={<Controllers />} />
                     <Route path="emulators" element={<Emulators />} />
+                    <Route path="catalog" element={<Catalog />} />
                     <Route path="settings" element={<Settings />} />
                   </Routes>
                 </AnimatePresence>

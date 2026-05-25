@@ -33,6 +33,19 @@ export default function Library(): JSX.Element {
   const [addOpen, setAddOpen] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('title')
   const [sortAsc, setSortAsc] = useState(true)
+  const [activeTag, setActiveTag] = useState<string | null>(null)
+
+  // All unique tags with counts, restricted to currently-visible platform
+  const tagsWithCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const g of games) {
+      if (platform && g.platform !== platform) continue
+      for (const t of g.tags ?? []) m.set(t, (m.get(t) ?? 0) + 1)
+    }
+    return Array.from(m.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [games, platform])
 
   const platformsPresent = useMemo(() => {
     const counts = new Map<PlatformId, number>()
@@ -47,6 +60,7 @@ export default function Library(): JSX.Element {
     const out = games
       .filter((g) => (platform ? g.platform === platform : true))
       .filter((g) => (statusFilter === 'all' ? true : g.status === statusFilter))
+      .filter((g) => (activeTag ? (g.tags ?? []).includes(activeTag) : true))
       .filter((g) =>
         query.trim() === '' ? true : g.title.toLowerCase().includes(query.toLowerCase())
       )
@@ -64,7 +78,7 @@ export default function Library(): JSX.Element {
       }
     })
     return out
-  }, [games, platform, statusFilter, query, sortKey, sortAsc])
+  }, [games, platform, statusFilter, activeTag, query, sortKey, sortAsc])
 
   const currentPlatform = platform ? PLATFORMS[platform] : null
 
@@ -149,7 +163,7 @@ export default function Library(): JSX.Element {
             </button>
           ))}
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1.5 flex-wrap">
             <span className="text-slate-500">Ordenar por:</span>
             <select
               value={sortKey}
@@ -175,6 +189,36 @@ export default function Library(): JSX.Element {
             </button>
           </div>
         </div>
+
+        {/* Tag filter row (hidden if no tags exist) */}
+        {tagsWithCounts.length > 0 && (
+          <div className="flex items-center gap-2 mt-3 text-xs flex-wrap">
+            <span className="text-slate-500">Tags:</span>
+            <button
+              onClick={() => setActiveTag(null)}
+              className={`px-2.5 py-1 rounded-full transition-colors ${
+                !activeTag
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              todas
+            </button>
+            {tagsWithCounts.map(({ tag, count }) => (
+              <button
+                key={tag}
+                onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                className={`px-2.5 py-1 rounded-full transition-colors ${
+                  activeTag === tag
+                    ? 'bg-accent/20 text-accent'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                #{tag} <span className="text-slate-500">· {count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="px-12 py-8">

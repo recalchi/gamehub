@@ -94,6 +94,8 @@ export interface Game {
   flags: string[]
   /** discovered companion files (e.g. .cue → all referenced .bin files) */
   relatedFiles: string[]
+  /** user-defined labels for organization (e.g. "multiplayer", "speedrun") */
+  tags?: string[]
 }
 
 export interface DetectedEmulator {

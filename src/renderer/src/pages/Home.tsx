@@ -1,25 +1,23 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { Library, Play, RefreshCw, Settings as SettingsIcon, Tv } from 'lucide-react'
+import { Settings as SettingsIcon } from 'lucide-react'
 import AnimatedBackground from '../components/AnimatedBackground'
 import GameCard from '../components/GameCard'
+import RotatingHero from '../components/RotatingHero'
 import ScanBanner from '../components/ScanBanner'
 import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 
 export default function Home(): JSX.Element {
   const games = useLibraryStore((s) => s.games)
-  const scan = useLibraryStore((s) => s.scan)
-  const progress = useLibraryStore((s) => s.progress)
 
   const recent = [...games]
     .filter((g) => g.lastPlayedAt)
     .sort((a, b) => (b.lastPlayedAt ?? '').localeCompare(a.lastPlayedAt ?? ''))
     .slice(0, 8)
 
-  // Smarter hero pick: most-recently-played → most-recently-added → first
-  // ready → first by title. Beats showing whatever's first alphabetically.
-  const featured = pickFeatured(games)
+  // Hero rotates between recently played + favorites + a couple of ready games
+  const heroCandidates = pickHeroPool(games)
   const favorites = games.filter((g) => g.favorite).slice(0, 8)
   const platformsWithGames = Array.from(new Set(games.map((g) => g.platform))).filter(
     (p) => p !== 'unknown'
@@ -35,85 +33,7 @@ export default function Home(): JSX.Element {
       <AnimatedBackground />
       <ScanBanner />
 
-      {/* Hero */}
-      <section className="relative px-12 pt-16 pb-12">
-        <div className="flex items-start justify-between gap-8">
-          <div className="max-w-2xl">
-            <motion.p
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="text-accent text-xs tracking-[0.3em] uppercase mb-3 font-display"
-            >
-              Bem-vindo de volta
-            </motion.p>
-            <motion.h1
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1, transition: { delay: 0.1 } }}
-              className="text-5xl font-display font-bold leading-tight"
-            >
-              {featured ? featured.title : 'Sua biblioteca está vazia'}
-            </motion.h1>
-            <motion.p
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1, transition: { delay: 0.2 } }}
-              className="text-slate-400 mt-3 max-w-lg"
-            >
-              {featured
-                ? `${PLATFORMS[featured.platform].name} · ${games.length} jogos no total · ${platformsWithGames.length} plataformas`
-                : 'Configure o caminho dos seus jogos para começar.'}
-            </motion.p>
-
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1, transition: { delay: 0.3 } }}
-              className="flex gap-3 mt-8"
-            >
-              {featured && (
-                <Link
-                  to={`/game/${featured.id}`}
-                  className="px-6 py-3 bg-accent text-ink-950 rounded-lg font-semibold flex items-center gap-2 hover:bg-accent/90 transition-all shadow-[0_0_30px_rgba(94,234,212,0.4)] hover:shadow-[0_0_40px_rgba(94,234,212,0.7)]"
-                >
-                  <Play className="w-4 h-4 fill-current" /> Jogar agora
-                </Link>
-              )}
-              <Link
-                to="/library"
-                className="px-6 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all"
-              >
-                <Library className="w-4 h-4" /> Biblioteca
-              </Link>
-              <Link
-                to="/tv"
-                className="px-6 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all"
-                title="Modo console fullscreen"
-              >
-                <Tv className="w-4 h-4" /> Modo TV
-              </Link>
-              <button
-                onClick={() => scan({ fresh: true })}
-                disabled={progress.phase !== 'idle' && progress.phase !== 'done'}
-                className="px-6 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={`w-4 h-4 ${progress.phase !== 'idle' && progress.phase !== 'done' ? 'animate-spin' : ''}`}
-                />
-                Re-escanear
-              </button>
-            </motion.div>
-          </div>
-
-          {/* Featured cover */}
-          {featured && (
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1, transition: { delay: 0.2, duration: 0.6 } }}
-              className="hidden lg:block"
-            >
-              <GameCard game={featured} />
-            </motion.div>
-          )}
-        </div>
-      </section>
+      <RotatingHero candidates={heroCandidates} />
 
       {games.length === 0 ? (
         <EmptyState />
@@ -135,15 +55,36 @@ export default function Home(): JSX.Element {
   )
 }
 
-function pickFeatured(games: import('@shared/types').Game[]): import('@shared/types').Game | undefined {
-  if (games.length === 0) return undefined
-  const played = games.filter((g) => g.lastPlayedAt)
-  if (played.length > 0) {
-    return [...played].sort((a, b) => (b.lastPlayedAt ?? '').localeCompare(a.lastPlayedAt ?? ''))[0]
+/**
+ * Pick the rotating hero pool. We mix:
+ *   - most-recently-played (up to 2)
+ *   - favorites (up to 2)
+ *   - ready games sorted by recency added (fill to 5)
+ *
+ * Deduped by id, max 5 entries so the rotation feels purposeful rather than
+ * an endless slideshow.
+ */
+function pickHeroPool(games: import('@shared/types').Game[]): import('@shared/types').Game[] {
+  if (games.length === 0) return []
+  const seen = new Set<string>()
+  const out: import('@shared/types').Game[] = []
+  const add = (g?: import('@shared/types').Game): void => {
+    if (!g || seen.has(g.id) || out.length >= 5) return
+    seen.add(g.id)
+    out.push(g)
   }
-  const ready = games.filter((g) => g.status === 'ready')
-  const pool = ready.length > 0 ? ready : games
-  return [...pool].sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))[0] ?? pool[0]
+  const recent = [...games]
+    .filter((g) => g.lastPlayedAt)
+    .sort((a, b) => (b.lastPlayedAt ?? '').localeCompare(a.lastPlayedAt ?? ''))
+  recent.slice(0, 2).forEach(add)
+  games.filter((g) => g.favorite).slice(0, 2).forEach(add)
+  const ready = [...games]
+    .filter((g) => g.status === 'ready')
+    .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
+  ready.forEach(add)
+  // Fallback: anything left
+  games.forEach(add)
+  return out
 }
 
 function Shelf({

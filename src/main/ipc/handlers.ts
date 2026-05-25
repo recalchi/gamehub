@@ -7,6 +7,7 @@ import { log } from '@main/core/logger'
 import { enrichLibrary, fetchSingle, setManualCover } from '@main/core/covers'
 import { checkBios } from '@main/core/bios'
 import { collectAbout, checkForUpdate } from '@main/core/about'
+import { applyBackup, exportBackup, previewBackup } from '@main/core/backup'
 import { addManualGame, removeGame, type ManualGameInput } from '@main/core/manualGames'
 import { startDownload, cancelDownload, type StartDownloadInput } from '@main/core/downloads'
 import {
@@ -197,4 +198,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.system.about, () => collectAbout())
   ipcMain.handle(IPC.system.checkUpdate, (_e, url?: string) => checkForUpdate(url))
+  ipcMain.handle(IPC.system.exportBackup, () => exportBackup())
+  ipcMain.handle(IPC.system.previewBackup, () => previewBackup())
+  ipcMain.handle(IPC.system.applyBackup, (_e, path: string) => applyBackup(path))
 }

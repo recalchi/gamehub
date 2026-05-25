@@ -8,7 +8,11 @@ import { backupSave, listBackups } from './core/saves'
 import { addManualGame, removeGame } from './core/manualGames'
 import { startDownload } from './core/downloads'
 import { launchGame, listActiveLaunches } from './core/launcher'
+import { writeBackupTo, applyBackup } from './core/backup'
 import { IPC } from '@shared/ipc'
+import { tmpdir } from 'node:os'
+import { join as joinPath } from 'node:path'
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -253,6 +257,69 @@ async function runSmokeLaunch(): Promise<number> {
   }
 }
 
+/**
+ * Headless smoke test for backup + restore.
+ *
+ * Exports current state → munges library.json on disk → restores from the
+ * backup file → asserts the munge was reverted. Validates the full
+ * round-trip without any dialogs.
+ */
+async function runSmokeBackup(): Promise<number> {
+  const target = joinPath(tmpdir(), `gamehub-backup-smoke-${Date.now()}.json`)
+  try {
+    // Export current state
+    const w = await writeBackupTo(target)
+    if ('error' in w) {
+      log.error('smoke-backup', `export failed: ${w.error}`)
+      return 1
+    }
+    log.info('smoke-backup', `wrote backup to ${target}`)
+
+    // Capture current library file content
+    const before = libraryStore.load()
+    const beforeCount = before.games.length
+
+    // Munge: empty the library file directly
+    writeFileSync(
+      joinPath(app.getPath('userData'), 'library.json'),
+      JSON.stringify({ games: [], emulators: [], updatedAt: 'munged' })
+    )
+    const munged = libraryStore.load()
+    if (munged.games.length !== 0) {
+      log.error('smoke-backup', `munge failed (still ${munged.games.length} games)`)
+      return 1
+    }
+    log.info('smoke-backup', 'munged library.json to empty')
+
+    // Restore
+    const r = await applyBackup(target)
+    if ('error' in r) {
+      log.error('smoke-backup', `apply failed: ${r.error}`)
+      return 1
+    }
+    const after = libraryStore.load()
+    if (after.games.length !== beforeCount) {
+      log.error('smoke-backup', `restore mismatch: expected ${beforeCount}, got ${after.games.length}`)
+      return 1
+    }
+    log.info('smoke-backup', `restored ${after.games.length} games ok`)
+
+    // Cleanup test artifacts (the backup file + the auto-safety snapshot
+    // applyBackup wrote alongside it)
+    try {
+      unlinkSync(target)
+      // Sibling safety file: <target>.pre-restore-<ts>.json
+      // We can't predict the exact ts so glob the dir, but tmp doesn't matter
+    } catch {
+      /* ignore cleanup errors */
+    }
+    return 0
+  } catch (err) {
+    log.error('smoke-backup', `unhandled: ${String(err)}`)
+    return 1
+  }
+}
+
 app.whenReady().then(async () => {
   log.info('app', `GameHub started — Electron ${process.versions.electron}`)
   registerIpcHandlers()
@@ -274,6 +341,11 @@ app.whenReady().then(async () => {
   }
   if (process.argv.includes('--smoke-launch')) {
     const code = await runSmokeLaunch()
+    setTimeout(() => app.exit(code), 200)
+    return
+  }
+  if (process.argv.includes('--smoke-backup')) {
+    const code = await runSmokeBackup()
     setTimeout(() => app.exit(code), 200)
     return
   }

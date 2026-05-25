@@ -126,6 +126,8 @@ export interface AppSettings {
   locale: 'pt-BR' | 'en-US'
   /** input preferences */
   input: InputSettings
+  /** set to true once the user has dismissed the onboarding tour */
+  hasSeenOnboarding?: boolean
 }
 
 export interface InputSettings {

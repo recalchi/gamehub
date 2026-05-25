@@ -14,11 +14,12 @@ export default function SearchPage(): JSX.Element {
     () =>
       new Fuse(games, {
         keys: [
-          { name: 'title', weight: 0.5 },
-          { name: 'platform', weight: 0.15 },
-          { name: 'developer', weight: 0.15 },
+          { name: 'title', weight: 0.45 },
+          { name: 'platform', weight: 0.12 },
+          { name: 'developer', weight: 0.13 },
           { name: 'genre', weight: 0.1 },
-          { name: 'description', weight: 0.1 }
+          { name: 'description', weight: 0.08 },
+          { name: 'tags', weight: 0.12 }
         ],
         threshold: 0.4,
         ignoreLocation: true

@@ -23,6 +23,7 @@ import type { Game } from '@shared/types'
 import SaveManagerPanel from '../components/SaveManagerPanel'
 import BiosPanel from '../components/BiosPanel'
 import MetadataEditor from '../components/MetadataEditor'
+import TagEditor from '../components/TagEditor'
 
 export default function GameDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -171,6 +172,7 @@ export default function GameDetail(): JSX.Element {
             </div>
 
             <MetadataEditor game={game} />
+            <TagEditor game={game} />
 
             {/* Actions */}
             <div className="mt-8 flex gap-3 flex-wrap">

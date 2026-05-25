@@ -1,0 +1,206 @@
+import { useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowDownNarrowWide, ArrowUpNarrowWide, Filter, Plus, Search as SearchIcon } from 'lucide-react'
+import GameCard from '../components/GameCard'
+import AddGameModal from '../components/AddGameModal'
+import { useLibraryStore } from '../store/library'
+import { PLATFORMS, PLATFORM_LIST } from '@shared/platforms'
+import type { GameStatus, PlatformId } from '@shared/types'
+
+const STATUS_FILTERS: Array<{ id: GameStatus | 'all'; label: string }> = [
+  { id: 'all', label: 'Todos' },
+  { id: 'ready', label: 'Prontos' },
+  { id: 'missing-emulator', label: 'Sem emulador' },
+  { id: 'missing-bios', label: 'BIOS' },
+  { id: 'corrupted', label: 'Suspeitos' }
+]
+
+type SortKey = 'title' | 'playTime' | 'addedAt' | 'lastPlayedAt'
+
+const SORT_OPTIONS: Array<{ id: SortKey; label: string }> = [
+  { id: 'title', label: 'Título' },
+  { id: 'playTime', label: 'Tempo jogado' },
+  { id: 'addedAt', label: 'Adição' },
+  { id: 'lastPlayedAt', label: 'Última vez' }
+]
+
+export default function Library(): JSX.Element {
+  const { platform } = useParams<{ platform?: PlatformId }>()
+  const games = useLibraryStore((s) => s.games)
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<GameStatus | 'all'>('all')
+  const [addOpen, setAddOpen] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('title')
+  const [sortAsc, setSortAsc] = useState(true)
+
+  const platformsPresent = useMemo(() => {
+    const counts = new Map<PlatformId, number>()
+    for (const g of games) counts.set(g.platform, (counts.get(g.platform) ?? 0) + 1)
+    return PLATFORM_LIST.filter((p) => counts.has(p.id)).map((p) => ({
+      ...p,
+      count: counts.get(p.id) ?? 0
+    }))
+  }, [games])
+
+  const filtered = useMemo(() => {
+    const out = games
+      .filter((g) => (platform ? g.platform === platform : true))
+      .filter((g) => (statusFilter === 'all' ? true : g.status === statusFilter))
+      .filter((g) =>
+        query.trim() === '' ? true : g.title.toLowerCase().includes(query.toLowerCase())
+      )
+    const direction = sortAsc ? 1 : -1
+    out.sort((a, b) => {
+      switch (sortKey) {
+        case 'title':
+          return direction * a.title.localeCompare(b.title)
+        case 'playTime':
+          return direction * ((a.playTime ?? 0) - (b.playTime ?? 0))
+        case 'addedAt':
+          return direction * (a.addedAt ?? '').localeCompare(b.addedAt ?? '')
+        case 'lastPlayedAt':
+          return direction * (a.lastPlayedAt ?? '').localeCompare(b.lastPlayedAt ?? '')
+      }
+    })
+    return out
+  }, [games, platform, statusFilter, query, sortKey, sortAsc])
+
+  const currentPlatform = platform ? PLATFORMS[platform] : null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      className="min-h-full"
+    >
+      <div className="px-12 pt-12 pb-6 sticky top-0 z-20 backdrop-blur-md bg-ink-950/80 border-b border-white/5">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-3xl font-display font-bold">
+              {currentPlatform ? currentPlatform.name : 'Biblioteca completa'}
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">
+              {filtered.length} de {games.length} jogos
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 glass rounded-lg px-3 py-2 w-72">
+              <SearchIcon className="w-4 h-4 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar nesta biblioteca..."
+                className="bg-transparent flex-1 outline-none text-sm placeholder:text-slate-500"
+              />
+            </div>
+            <button
+              onClick={() => setAddOpen(true)}
+              className="px-4 py-2 bg-accent text-ink-950 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-accent/90 transition-all shadow-[0_0_24px_-8px_rgba(94,234,212,0.5)]"
+            >
+              <Plus className="w-4 h-4" /> Adicionar
+            </button>
+          </div>
+        </div>
+
+        {/* Platform chips */}
+        <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
+          <Link
+            to="/library"
+            className={chipClass(!platform)}
+          >
+            Todos · {games.length}
+          </Link>
+          {platformsPresent.map((p) => (
+            <Link
+              key={p.id}
+              to={`/library/${p.id}`}
+              className={chipClass(platform === p.id)}
+              style={{
+                borderColor:
+                  platform === p.id ? p.color : 'rgba(255,255,255,0.06)'
+              }}
+            >
+              <span
+                className="inline-block w-2 h-2 rounded-full mr-2"
+                style={{ background: p.color }}
+              />
+              {p.shortName} · {p.count}
+            </Link>
+          ))}
+        </div>
+
+        {/* Status filters + sort */}
+        <div className="flex items-center gap-2 mt-3 text-xs flex-wrap">
+          <Filter className="w-3.5 h-3.5 text-slate-500" />
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setStatusFilter(f.id)}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                statusFilter === f.id
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-slate-500">Ordenar por:</span>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="bg-ink-800 border border-white/5 rounded-md px-2 py-1 outline-none focus:border-accent text-xs"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setSortAsc((x) => !x)}
+              title={sortAsc ? 'Crescente' : 'Decrescente'}
+              className="p-1 rounded hover:bg-white/5 text-slate-300"
+            >
+              {sortAsc ? (
+                <ArrowUpNarrowWide className="w-3.5 h-3.5" />
+              ) : (
+                <ArrowDownNarrowWide className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-12 py-8">
+        {filtered.length === 0 ? (
+          <div className="text-center text-slate-500 py-24">Nenhum jogo encontrado.</div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-5">
+            {filtered.map((g) => (
+              <Link to={`/game/${g.id}`} key={g.id}>
+                <GameCard game={g} />
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <AddGameModal open={addOpen} onClose={() => setAddOpen(false)} />
+    </motion.div>
+  )
+}
+
+function chipClass(active: boolean): string {
+  return [
+    'shrink-0 px-3 py-1.5 rounded-full border text-xs whitespace-nowrap transition-all',
+    active
+      ? 'bg-accent/15 text-accent border-accent'
+      : 'bg-white/[0.02] text-slate-300 border-white/5 hover:bg-white/5 hover:text-white'
+  ].join(' ')
+}

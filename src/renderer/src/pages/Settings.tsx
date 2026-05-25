@@ -5,6 +5,7 @@ import { useLibraryStore } from '../store/library'
 import { EMULATOR_LIST } from '@shared/emulators'
 import LogViewer from '../components/LogViewer'
 import AboutPanel from '../components/AboutPanel'
+import AccentPicker from '../components/AccentPicker'
 
 export default function Settings(): JSX.Element {
   const settings = useLibraryStore((s) => s.settings)
@@ -172,16 +173,21 @@ export default function Settings(): JSX.Element {
 
       <section className="glass rounded-2xl p-6 mb-6">
         <h2 className="font-display font-semibold text-lg mb-3">Aparência & inicialização</h2>
-        <Toggle
-          label="Abrir em tela cheia"
-          checked={settings.fullscreenOnStart}
-          onChange={(v) => saveSettings({ fullscreenOnStart: v })}
-        />
-        <Toggle
-          label="Pular splash após primeira execução"
-          checked={settings.skipSplash}
-          onChange={(v) => saveSettings({ skipSplash: v })}
-        />
+        <div className="space-y-4">
+          <AccentPicker />
+          <div className="border-t border-white/5 pt-3 space-y-1">
+            <Toggle
+              label="Abrir em tela cheia"
+              checked={settings.fullscreenOnStart}
+              onChange={(v) => saveSettings({ fullscreenOnStart: v })}
+            />
+            <Toggle
+              label="Pular splash após primeira execução"
+              checked={settings.skipSplash}
+              onChange={(v) => saveSettings({ skipSplash: v })}
+            />
+          </div>
+        </div>
       </section>
 
       <section className="glass rounded-2xl p-6 mb-6">

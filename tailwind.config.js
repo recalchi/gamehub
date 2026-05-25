@@ -15,9 +15,13 @@ export default {
           700: '#1a1f2e',
           600: '#222838'
         },
+        // accent.DEFAULT reads from a CSS variable so we can re-theme at
+        // runtime when the user changes their accent color in Settings.
+        // The variable carries `R G B` (space-separated) per Tailwind's
+        // arbitrary-color recipe; alpha is filled in by `<alpha-value>`.
         accent: {
-          DEFAULT: '#5eead4',
-          glow: '#22d3ee',
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
+          glow: 'rgb(var(--accent-glow) / <alpha-value>)',
           warm: '#f59e0b',
           danger: '#f87171'
         }

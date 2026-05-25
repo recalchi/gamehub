@@ -25,6 +25,19 @@ export default function App(): JSX.Element {
     init()
   }, [init])
 
+  // Apply the user's accent color as a CSS variable so every `text-accent` /
+  // `bg-accent` class re-themes automatically. We also derive a slightly
+  // brighter "glow" companion for shadows/highlights.
+  const accentColor = useLibraryStore((s) => s.settings?.accentColor)
+  useEffect(() => {
+    if (!accentColor) return
+    const rgb = hexToRgbSpaceSeparated(accentColor)
+    if (!rgb) return
+    document.documentElement.style.setProperty('--accent', rgb)
+    // Glow = same hue, shifted a bit toward cyan for the existing aesthetic
+    document.documentElement.style.setProperty('--accent-glow', rgb)
+  }, [accentColor])
+
   // Global gamepad shortcuts (Back/Select/Start)
   useGamepad({
     onBack: () => window.history.back(),
@@ -77,4 +90,13 @@ export default function App(): JSX.Element {
       <LaunchFailureToast />
     </div>
   )
+}
+
+/** "#5eead4" → "94 234 212". Tailwind's `rgb(var(--x) / <alpha>)` recipe wants
+ *  the value in this space-separated form so opacity utilities still work. */
+function hexToRgbSpaceSeparated(hex: string): string | null {
+  const m = hex.replace('#', '').match(/^([0-9a-f]{6})$/i)
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`
 }

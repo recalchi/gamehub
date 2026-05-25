@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
+  BarChart3,
   Cpu,
   Gamepad,
   Gamepad2,
@@ -21,6 +22,7 @@ const items = [
   { to: '/library', icon: Library, label: 'Biblioteca' },
   { to: '/catalog', icon: Package, label: 'Catálogo' },
   { to: '/search', icon: Search, label: 'Buscar' },
+  { to: '/stats', icon: BarChart3, label: 'Estatísticas' },
   { to: '/emulators', icon: Cpu, label: 'Emuladores' },
   { to: '/controllers', icon: Gamepad, label: 'Controles' },
   { to: '/settings', icon: SettingsIcon, label: 'Configurações' }

@@ -15,6 +15,7 @@ import Stats from './pages/Stats'
 import ShortcutsOverlay from './components/ShortcutsOverlay'
 import LaunchFailureToast from './components/LaunchFailureToast'
 import OnboardingTour from './components/OnboardingTour'
+import DropZone from './components/DropZone'
 import { useLibraryStore } from './store/library'
 import { useGamepad } from './hooks/useGamepad'
 import Sidebar from './components/Sidebar'
@@ -94,6 +95,7 @@ export default function App(): JSX.Element {
       <ShortcutsOverlay />
       <LaunchFailureToast />
       <OnboardingTour />
+      <DropZone />
     </div>
   )
 }

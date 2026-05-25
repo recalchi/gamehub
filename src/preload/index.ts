@@ -97,6 +97,7 @@ export interface GameHubApi {
     toggleFullscreen: () => Promise<boolean>
     setFullscreen: (on: boolean) => Promise<boolean>
     isFullscreen: () => Promise<boolean>
+    statPath: (path: string) => Promise<{ exists: boolean; isDirectory: boolean; size: number }>
     logs: (limit?: number) => Promise<LogEntry[]>
     log: (level: 'info' | 'warn' | 'error', scope: string, message: string, data?: unknown) => Promise<void>
     about: () => Promise<AppInfo>
@@ -201,6 +202,7 @@ const api: GameHubApi = {
     toggleFullscreen: () => ipcRenderer.invoke(IPC.system.toggleFullscreen),
     setFullscreen: (on) => ipcRenderer.invoke(IPC.system.setFullscreen, on),
     isFullscreen: () => ipcRenderer.invoke(IPC.system.isFullscreen),
+    statPath: (path) => ipcRenderer.invoke(IPC.system.statPath, path),
     logs: (limit) => ipcRenderer.invoke(IPC.system.logs, limit),
     log: (level, scope, message, data) => ipcRenderer.invoke(IPC.system.log, level, scope, message, data),
     about: () => ipcRenderer.invoke(IPC.system.about),

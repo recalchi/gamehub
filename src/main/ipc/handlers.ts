@@ -194,6 +194,16 @@ export function registerIpcHandlers(): void {
     return win ? win.isFullScreen() : false
   })
 
+  ipcMain.handle(IPC.system.statPath, async (_e, path: string) => {
+    try {
+      const { stat } = await import('node:fs/promises')
+      const st = await stat(path)
+      return { exists: true, isDirectory: st.isDirectory(), size: st.size }
+    } catch {
+      return { exists: false, isDirectory: false, size: 0 }
+    }
+  })
+
   ipcMain.handle(IPC.system.logs, (_e, limit?: number) => log.recent(limit))
 
   ipcMain.handle(IPC.system.log, (_e, level: 'info' | 'warn' | 'error', scope: string, message: string, data?: unknown) => {

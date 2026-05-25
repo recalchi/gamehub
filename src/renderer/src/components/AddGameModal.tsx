@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Download, File, Globe, HardDrive, Image as ImageIcon, Plus, X } from 'lucide-react'
 import { PLATFORM_LIST } from '@shared/platforms'
@@ -9,6 +9,8 @@ interface Props {
   open: boolean
   onClose: () => void
   onAdded?: (id: string) => void
+  /** pre-fill the path field (e.g. from drag-and-drop) */
+  initialPath?: string
 }
 
 type Mode = 'local' | 'url'
@@ -22,11 +24,21 @@ type Mode = 'local' | 'url'
  *   - **URL**: stream a remote file to userData/downloads/<platform>/, then
  *     auto-register it as a manual game. Progress streams via IPC.
  */
-export default function AddGameModal({ open, onClose, onAdded }: Props): JSX.Element {
+export default function AddGameModal({ open, onClose, onAdded, initialPath }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('local')
   const [path, setPath] = useState('')
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
+
+  // Apply incoming initialPath when the modal opens with one
+  useEffect(() => {
+    if (open && initialPath) {
+      setPath(initialPath)
+      const base = initialPath.split(/[\\/]/).pop() ?? initialPath
+      setTitle(base.replace(/\.[^.]+$/, ''))
+      setMode('local')
+    }
+  }, [open, initialPath])
   const [platform, setPlatform] = useState<PlatformId>('pc')
   const [coverPath, setCoverPath] = useState('')
   const [busy, setBusy] = useState(false)
@@ -96,7 +108,7 @@ export default function AddGameModal({ open, onClose, onAdded }: Props): JSX.Ele
     setCoverPath(p)
   }
 
-  async function submit(e: React.FormEvent): Promise<void> {
+  async function submit(e: FormEvent): Promise<void> {
     e.preventDefault()
     setError(null)
     if (!title.trim()) {

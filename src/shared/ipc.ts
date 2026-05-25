@@ -58,6 +58,7 @@ export const IPC = {
     toggleFullscreen: 'system:toggle-fullscreen',
     setFullscreen: 'system:set-fullscreen',
     isFullscreen: 'system:is-fullscreen',
+    statPath: 'system:stat-path',
     logs: 'system:logs',
     log: 'system:log',
     about: 'system:about',

@@ -4,6 +4,7 @@ dist
 release
 .vite
 *.log
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 .env

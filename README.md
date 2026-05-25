@@ -105,15 +105,18 @@ Status flags on each game card:
 - [x] Per-game cover refetch + custom local image picker
 
 ### Screens
-- [x] **Home** — hero + recents + favorites + per-platform shelves
-- [x] **Biblioteca** — filterable grid with platform chips and status filters
-- [x] **Buscar** — fuzzy search via Fuse.js across the library
+- [x] **Home** — rotating hero (Ken Burns, 9s cross-fade) + recents + favorites + per-platform shelves
+- [x] **Biblioteca** — grid with platform chips, status filters, tag filter, sort options, manual add
+- [x] **Catálogo** — curated free/homebrew games with one-click install
+- [x] **Buscar** — fuzzy search (Fuse.js) across title/platform/dev/genre/description/tags
+- [x] **Estatísticas** — KPIs, per-platform bar chart, per-status donut, top-played, cover hit rate
 - [x] **Emuladores** — per-emulator status, BIOS check, "open BIOS folder", legal links
 - [x] **Controles** — live gamepad detector with button/axis visualizer + preferences
-- [x] **Configurações** — paths, emulator overrides, About panel, update check, log viewer
-- [x] **Modo TV / Big Picture** — XMB-inspired fullscreen layout, pure gamepad nav
-- [x] **Detalhes do jogo** — cover/metadata/BIOS/save manager/all actions
+- [x] **Configurações** — paths, emulator overrides, accent picker, About, update check, log viewer, health check, backup/restore
+- [x] **Modo TV / Big Picture** — XMB-inspired fullscreen, auto-enters fullscreen, pure gamepad nav
+- [x] **Detalhes do jogo** — cover actions, inline title edit, metadata + tags editor, BIOS check, save manager, remove
 - [x] **Atalhos overlay** — press `?` anywhere for keyboard + gamepad reference
+- [x] **Onboarding tour** — 3-step welcome on first launch with empty library
 
 ### Plumbing
 - [x] Update checker hitting a configurable JSON manifest URL
@@ -121,10 +124,16 @@ Status flags on each game card:
 - [x] Daily-rotating log file + in-app log viewer with level filter
 - [x] Gamepad nav: deadzone, preferred-pad selection, A/B swap, Y inversion
 - [x] CSP-compliant renderer with file:// covers
+- [x] React error boundary + window-level unhandled-rejection logger
 - [x] **Launch failure toast** — emulator exits non-zero in <10s → user-facing alert
+- [x] **Now Playing** indicator — sidebar shows pulsing pill while an emulator runs
+- [x] **Live accent color** — CSS variable + Tailwind recipe, 6 presets + hex input
+- [x] **Tag system** — per-game user labels with autocomplete + Library filter chips
+- [x] **Library health check** — broken paths + orphan cover cleanup
+- [x] **Backup/restore** — single JSON containing settings + library, with safety snapshot
 - [x] **Metadata editor** (genre, developer, year, description) — feeds fuzzy search
 - [x] **URL download manager** — streams remote files to `userData/downloads/<platform>/`, auto-registers as games
-- [x] Three headless smoke tests for CI (`--smoke-saves`, `--smoke-manual`, `--smoke-download`)
+- [x] Five headless smoke tests for CI (saves, manual, download, launch, backup)
 
 ## Roadmap
 

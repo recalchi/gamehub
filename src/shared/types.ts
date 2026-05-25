@@ -224,6 +224,26 @@ export interface UpdateInfo {
   error?: string
 }
 
+export type HealthIssueKind =
+  | 'missing-file'
+  | 'unreadable-file'
+  | 'orphan-cover'
+  | 'orphan-banner'
+
+export interface HealthIssue {
+  kind: HealthIssueKind
+  gameId?: string
+  gameTitle?: string
+  path: string
+  message: string
+}
+
+export interface HealthReport {
+  issues: HealthIssue[]
+  orphanBytes: number
+  durationMs: number
+}
+
 export interface BiosCheck {
   required: boolean
   found: boolean

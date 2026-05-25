@@ -7,6 +7,7 @@ import {
   Gamepad2,
   Home,
   Library,
+  Package,
   Play,
   Search,
   Settings as SettingsIcon,
@@ -18,6 +19,7 @@ import type { ActiveLaunch } from '@shared/types'
 const items = [
   { to: '/home', icon: Home, label: 'Início' },
   { to: '/library', icon: Library, label: 'Biblioteca' },
+  { to: '/catalog', icon: Package, label: 'Catálogo' },
   { to: '/search', icon: Search, label: 'Buscar' },
   { to: '/emulators', icon: Cpu, label: 'Emuladores' },
   { to: '/controllers', icon: Gamepad, label: 'Controles' },

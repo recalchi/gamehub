@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { scanLibrary } from '@main/core/scanner'
 import { detectEmulators } from '@main/core/emulators'
-import { launchGame, openFolder } from '@main/core/launcher'
+import { launchGame, listActiveLaunches, openFolder } from '@main/core/launcher'
 import { libraryStore, settingsStore } from '@main/core/store'
 import { log } from '@main/core/logger'
 import { enrichLibrary, fetchSingle, setManualCover } from '@main/core/covers'
@@ -140,6 +140,8 @@ export function registerIpcHandlers(): void {
     await openFolder(path)
     return { ok: true }
   })
+
+  ipcMain.handle(IPC.launch.active, () => listActiveLaunches())
 
   // ----- Saves -----
   ipcMain.handle(IPC.saves.location, (_e, gameId: string) => describeSaveLocation(gameId))

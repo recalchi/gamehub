@@ -182,6 +182,14 @@ export interface LaunchFailedEvent {
   emulatorName: string
 }
 
+export interface ActiveLaunch {
+  gameId: string
+  gameTitle: string
+  emulatorName: string
+  pid?: number
+  startedAt: string
+}
+
 export interface LogEntry {
   ts: string
   level: 'debug' | 'info' | 'warn' | 'error'

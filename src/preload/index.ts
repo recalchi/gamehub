@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
 import type {
+  ActiveLaunch,
   AppInfo,
   AppSettings,
   BiosCheck,
@@ -64,7 +65,10 @@ export interface GameHubApi {
   launch: {
     game: (id: string) => Promise<LaunchResult>
     folder: (path: string) => Promise<{ ok: boolean }>
+    active: () => Promise<ActiveLaunch[]>
     onFailed: (cb: (event: LaunchFailedEvent) => void) => () => void
+    onStarted: (cb: (event: ActiveLaunch) => void) => () => void
+    onEnded: (cb: (event: { gameId: string; gameTitle: string }) => void) => () => void
   }
   saves: {
     location: (gameId: string) => Promise<{ available: boolean; path?: string; label?: string }>
@@ -138,10 +142,22 @@ const api: GameHubApi = {
   launch: {
     game: (id) => ipcRenderer.invoke(IPC.launch.game, id),
     folder: (path) => ipcRenderer.invoke(IPC.launch.folder, path),
+    active: () => ipcRenderer.invoke(IPC.launch.active),
     onFailed: (cb) => {
       const listener = (_e: unknown, event: LaunchFailedEvent): void => cb(event)
       ipcRenderer.on(IPC.launch.failed, listener)
       return () => ipcRenderer.removeListener(IPC.launch.failed, listener)
+    },
+    onStarted: (cb) => {
+      const listener = (_e: unknown, event: ActiveLaunch): void => cb(event)
+      ipcRenderer.on(IPC.launch.started, listener)
+      return () => ipcRenderer.removeListener(IPC.launch.started, listener)
+    },
+    onEnded: (cb) => {
+      const listener = (_e: unknown, event: { gameId: string; gameTitle: string }): void =>
+        cb(event)
+      ipcRenderer.on(IPC.launch.ended, listener)
+      return () => ipcRenderer.removeListener(IPC.launch.ended, listener)
     }
   },
   saves: {

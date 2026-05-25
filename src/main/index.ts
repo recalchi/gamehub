@@ -7,6 +7,7 @@ import { scanLibrary } from './core/scanner'
 import { backupSave, listBackups } from './core/saves'
 import { addManualGame, removeGame } from './core/manualGames'
 import { startDownload } from './core/downloads'
+import { launchGame, listActiveLaunches } from './core/launcher'
 import { IPC } from '@shared/ipc'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -195,6 +196,63 @@ async function runSmokeDownload(): Promise<number> {
   }
 }
 
+/**
+ * Headless smoke test for the launch tracking flow.
+ *
+ * Adds a manual PC game pointing at a guaranteed-fast-exit Windows utility
+ * (`tasklist.exe`), launches it, asserts it shows up in the active-launches
+ * list, waits for the OS to reap it, then asserts the list cleared. Catches
+ * regressions in the spawn → markStarted → exit handler → markEnded chain.
+ */
+async function runSmokeLaunch(): Promise<number> {
+  try {
+    const exe = 'C:\\Windows\\System32\\tasklist.exe'
+    const g = addManualGame({
+      title: 'Smoke Launch Test',
+      path: exe,
+      platform: 'pc'
+    })
+    if ('error' in g) {
+      log.error('smoke-launch', `manual add failed: ${g.error}`)
+      return 1
+    }
+    const before = listActiveLaunches().length
+    const r = await launchGame(g)
+    if (!r.ok) {
+      log.error('smoke-launch', `launch failed: ${r.error}`)
+      removeGame(g.id)
+      return 1
+    }
+    const during = listActiveLaunches()
+    const found = during.find((a) => a.gameId === g.id)
+    if (!found) {
+      log.error('smoke-launch', `game not in active list (size=${during.length})`)
+      removeGame(g.id)
+      return 1
+    }
+    log.info('smoke-launch', `started, active=${during.length}, pid=${found.pid}`)
+
+    // tasklist usually finishes within 2s; give it 5s to be safe
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200))
+      if (listActiveLaunches().length === before) break
+    }
+    const after = listActiveLaunches().length
+    if (after !== before) {
+      log.error('smoke-launch', `still ${after} active after wait (expected ${before})`)
+      removeGame(g.id)
+      return 1
+    }
+    log.info('smoke-launch', 'started + ended events both fired ok')
+    removeGame(g.id)
+    return 0
+  } catch (err) {
+    log.error('smoke-launch', `unhandled: ${String(err)}`)
+    return 1
+  }
+}
+
 app.whenReady().then(async () => {
   log.info('app', `GameHub started — Electron ${process.versions.electron}`)
   registerIpcHandlers()
@@ -211,6 +269,11 @@ app.whenReady().then(async () => {
   }
   if (process.argv.includes('--smoke-download')) {
     const code = await runSmokeDownload()
+    setTimeout(() => app.exit(code), 200)
+    return
+  }
+  if (process.argv.includes('--smoke-launch')) {
+    const code = await runSmokeLaunch()
     setTimeout(() => app.exit(code), 200)
     return
   }

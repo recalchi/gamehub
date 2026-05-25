@@ -29,7 +29,13 @@ export const IPC = {
     game: 'launch:game',
     folder: 'launch:folder',
     /** broadcast: { gameId, gameTitle, code, seconds } when emulator exits non-zero early */
-    failed: 'launch:failed'
+    failed: 'launch:failed',
+    /** broadcast: ActiveLaunch payload when an emulator successfully spawns */
+    started: 'launch:started',
+    /** broadcast: { gameId, gameTitle } when its child process exits */
+    ended: 'launch:ended',
+    /** ipc: returns ActiveLaunch[] for currently running emulators */
+    active: 'launch:active'
   },
   saves: {
     location: 'saves:location',

@@ -12,16 +12,51 @@ import type { Game, LaunchResult } from '@shared/types'
  *  rather than a normal "user closed the game" — surface it to the renderer. */
 const FAILURE_THRESHOLD_SECONDS = 10
 
-function broadcastFailure(game: Game, code: number | null, seconds: number, emulatorName: string): void {
+function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(IPC.launch.failed, {
-      gameId: game.id,
-      gameTitle: game.title,
-      code,
-      seconds,
-      emulatorName
-    })
+    win.webContents.send(channel, payload)
   }
+}
+
+function broadcastFailure(game: Game, code: number | null, seconds: number, emulatorName: string): void {
+  broadcast(IPC.launch.failed, {
+    gameId: game.id,
+    gameTitle: game.title,
+    code,
+    seconds,
+    emulatorName
+  })
+}
+
+/**
+ * Active emulator processes keyed by gameId.
+ * `unref()` lets Node exit even if these are still running — which is what
+ * we want — but the `exit` event still fires here when the OS sends SIGCHLD.
+ */
+export interface ActiveLaunch {
+  gameId: string
+  gameTitle: string
+  emulatorName: string
+  pid?: number
+  startedAt: string
+}
+
+const active = new Map<string, ActiveLaunch>()
+
+export function listActiveLaunches(): ActiveLaunch[] {
+  return Array.from(active.values())
+}
+
+function markStarted(launch: ActiveLaunch): void {
+  active.set(launch.gameId, launch)
+  broadcast(IPC.launch.started, launch)
+}
+
+function markEnded(gameId: string): void {
+  const launch = active.get(gameId)
+  if (!launch) return
+  active.delete(gameId)
+  broadcast(IPC.launch.ended, { gameId, gameTitle: launch.gameTitle })
 }
 
 /**
@@ -62,8 +97,16 @@ export async function launchGame(game: Game): Promise<LaunchResult> {
       detached: true,
       stdio: 'ignore'
     })
+    markStarted({
+      gameId: game.id,
+      gameTitle: game.title,
+      emulatorName: emu.name,
+      pid: child.pid,
+      startedAt: new Date(startedAt).toISOString()
+    })
     child.on('error', (err) => {
       log.error('launcher', `child errored: ${err.message}`)
+      markEnded(game.id)
       broadcastFailure(game, null, 0, emu.name)
     })
     child.on('exit', (code) => {
@@ -73,6 +116,7 @@ export async function launchGame(game: Game): Promise<LaunchResult> {
         playTime: (game.playTime ?? 0) + seconds,
         lastPlayedAt: new Date().toISOString()
       })
+      markEnded(game.id)
       // Short-lived non-zero exit = almost certainly a launch failure
       // (missing BIOS, bad ISO, missing DLL). Surface to the renderer.
       if (code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
@@ -93,7 +137,27 @@ async function launchNative(game: Game): Promise<LaunchResult> {
     return { ok: false, error: `Arquivo não encontrado: ${game.path}` }
   }
   try {
+    const startedAt = Date.now()
     const child = spawn(game.path, [], { detached: true, stdio: 'ignore' })
+    markStarted({
+      gameId: game.id,
+      gameTitle: game.title,
+      emulatorName: 'Windows',
+      pid: child.pid,
+      startedAt: new Date(startedAt).toISOString()
+    })
+    child.on('error', () => markEnded(game.id))
+    child.on('exit', (code) => {
+      const seconds = Math.round((Date.now() - startedAt) / 1000)
+      libraryStore.patchGame(game.id, {
+        playTime: (game.playTime ?? 0) + seconds,
+        lastPlayedAt: new Date().toISOString()
+      })
+      markEnded(game.id)
+      if (code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
+        broadcastFailure(game, code, seconds, 'Windows')
+      }
+    })
     child.unref()
     return { ok: true, pid: child.pid, command: game.path }
   } catch (err) {

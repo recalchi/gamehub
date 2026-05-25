@@ -7,6 +7,7 @@ import LogViewer from '../components/LogViewer'
 import AboutPanel from '../components/AboutPanel'
 import AccentPicker from '../components/AccentPicker'
 import BackupPanel from '../components/BackupPanel'
+import HealthPanel from '../components/HealthPanel'
 
 export default function Settings(): JSX.Element {
   const settings = useLibraryStore((s) => s.settings)
@@ -206,6 +207,7 @@ export default function Settings(): JSX.Element {
             <Save className="w-3 h-3" /> {msg}
           </p>
         )}
+        <HealthPanel />
         <BackupPanel />
       </section>
 

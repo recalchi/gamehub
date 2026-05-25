@@ -12,7 +12,9 @@ export const IPC = {
     setManualCover: 'library:set-manual-cover',
     coverUpdated: 'library:cover-updated',
     addManual: 'library:add-manual',
-    remove: 'library:remove'
+    remove: 'library:remove',
+    healthCheck: 'library:health-check',
+    cleanOrphans: 'library:clean-orphans'
   },
   emulator: {
     list: 'emulator:list',

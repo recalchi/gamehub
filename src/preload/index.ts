@@ -9,6 +9,7 @@ import type {
   DownloadProgress,
   EmulatorId,
   Game,
+  HealthReport,
   LaunchFailedEvent,
   LaunchResult,
   LogEntry,
@@ -46,6 +47,8 @@ export interface GameHubApi {
       cover?: string
     }) => Promise<Game | { error: string }>
     remove: (id: string) => Promise<{ ok: true } | { error: string }>
+    healthCheck: () => Promise<HealthReport>
+    cleanOrphans: () => Promise<{ removed: number; bytes: number }>
     onProgress: (cb: (progress: ScanProgress) => void) => () => void
     onCoverUpdated: (
       cb: (payload: { gameId: string; cover?: string; banner?: string }) => void
@@ -127,6 +130,8 @@ const api: GameHubApi = {
       ipcRenderer.invoke(IPC.library.setManualCover, id, sourcePath),
     addManual: (input) => ipcRenderer.invoke(IPC.library.addManual, input),
     remove: (id) => ipcRenderer.invoke(IPC.library.remove, id),
+    healthCheck: () => ipcRenderer.invoke(IPC.library.healthCheck),
+    cleanOrphans: () => ipcRenderer.invoke(IPC.library.cleanOrphans),
     onProgress: (cb) => {
       const listener = (_e: unknown, progress: ScanProgress): void => cb(progress)
       ipcRenderer.on(IPC.library.progress, listener)

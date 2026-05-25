@@ -9,6 +9,7 @@ import { checkBios } from '@main/core/bios'
 import { collectAbout, checkForUpdate } from '@main/core/about'
 import { applyBackup, exportBackup, previewBackup } from '@main/core/backup'
 import { addManualGame, removeGame, type ManualGameInput } from '@main/core/manualGames'
+import { runHealthCheck, cleanOrphans } from '@main/core/health'
 import { startDownload, cancelDownload, type StartDownloadInput } from '@main/core/downloads'
 import {
   backupSave,
@@ -83,6 +84,9 @@ export function registerIpcHandlers(): void {
     log.info('ipc', `library.remove ${id}`)
     return removeGame(id)
   })
+
+  ipcMain.handle(IPC.library.healthCheck, () => runHealthCheck())
+  ipcMain.handle(IPC.library.cleanOrphans, () => cleanOrphans())
 
   // ----- Downloads -----
   ipcMain.handle(IPC.downloads.start, (_e, input: StartDownloadInput) => {

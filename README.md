@@ -144,6 +144,8 @@ without needing UI interaction. Useful in CI or as fast pre-commit checks:
 npx electron . --smoke-saves     # scans, picks a PS1 game, backs up its memcard
 npx electron . --smoke-manual    # adds + removes a manual game entry, verifies round-trip
 npx electron . --smoke-download  # downloads a tiny test file, auto-registers and cleans up
+npx electron . --smoke-launch    # spawns tasklist.exe and confirms started+ended events fire
+npx electron . --smoke-backup    # exports config, mungeds library, restores, verifies match
 ```
 
 All exit 0 on success, 1 on failure, with full log lines in

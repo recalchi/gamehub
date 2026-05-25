@@ -59,6 +59,9 @@ export const IPC = {
     logs: 'system:logs',
     log: 'system:log',
     about: 'system:about',
-    checkUpdate: 'system:check-update'
+    checkUpdate: 'system:check-update',
+    exportBackup: 'system:export-backup',
+    previewBackup: 'system:preview-backup',
+    applyBackup: 'system:apply-backup'
   }
 } as const

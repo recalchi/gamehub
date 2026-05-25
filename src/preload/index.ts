@@ -98,6 +98,19 @@ export interface GameHubApi {
     log: (level: 'info' | 'warn' | 'error', scope: string, message: string, data?: unknown) => Promise<void>
     about: () => Promise<AppInfo>
     checkUpdate: (url?: string) => Promise<UpdateInfo>
+    exportBackup: () => Promise<{ ok: true; path: string } | { error: string }>
+    previewBackup: () => Promise<
+      | {
+          ok: true
+          exportedAt: string
+          appVersion?: string
+          gameCount: number
+          emulatorCount: number
+          path: string
+        }
+      | { error: string }
+    >
+    applyBackup: (path: string) => Promise<{ ok: true } | { error: string }>
   }
 }
 
@@ -186,7 +199,10 @@ const api: GameHubApi = {
     logs: (limit) => ipcRenderer.invoke(IPC.system.logs, limit),
     log: (level, scope, message, data) => ipcRenderer.invoke(IPC.system.log, level, scope, message, data),
     about: () => ipcRenderer.invoke(IPC.system.about),
-    checkUpdate: (url) => ipcRenderer.invoke(IPC.system.checkUpdate, url)
+    checkUpdate: (url) => ipcRenderer.invoke(IPC.system.checkUpdate, url),
+    exportBackup: () => ipcRenderer.invoke(IPC.system.exportBackup),
+    previewBackup: () => ipcRenderer.invoke(IPC.system.previewBackup),
+    applyBackup: (path) => ipcRenderer.invoke(IPC.system.applyBackup, path)
   }
 }
 

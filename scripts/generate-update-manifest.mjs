@@ -11,6 +11,8 @@ const releaseDir = join(root, 'release')
 const exeName = `GameHub-Setup-x64-${version}.exe`
 const exePath = join(releaseDir, exeName)
 const latestYmlPath = join(releaseDir, 'latest.yml')
+const portableName = `GameHub-portable-x64-${version}.zip`
+const portablePath = join(releaseDir, portableName)
 
 if (!existsSync(exePath)) {
   throw new Error(`Installer not found: ${exePath}`)
@@ -36,8 +38,10 @@ const manifest = {
   releaseDate,
   channel,
   artifactUrl,
+  installerArtifact: exeName,
   sha256,
   size,
+  portableArtifact: existsSync(portablePath) ? portableName : undefined,
   releaseNotes,
   minSupportedVersion,
   releaseUrl
@@ -45,5 +49,9 @@ const manifest = {
 
 writeFileSync(join(releaseDir, 'releases.json'), JSON.stringify(manifest, null, 2), 'utf8')
 writeFileSync(join(releaseDir, `${exeName}.sha256`), `${sha256}  ${exeName}\n`, 'utf8')
+if (existsSync(portablePath)) {
+  const portableBuffer = readFileSync(portablePath)
+  const portableSha256 = createHash('sha256').update(portableBuffer).digest('hex')
+  writeFileSync(join(releaseDir, `${portableName}.sha256`), `${portableSha256}  ${portableName}\n`, 'utf8')
+}
 console.log(`Manifest generated: release/releases.json (${version})`)
-

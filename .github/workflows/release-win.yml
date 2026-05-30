@@ -25,11 +25,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Windows installer
-        run: npm run dist:win
-
-      - name: Generate update manifest and SHA256
-        run: npm run manifest:win
+      - name: Build installer + portable + manifest
+        run: npm run dist:win:full
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}\\.cache\\electron
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.cache\\electron-builder
 
       - name: Resolve version
         id: version
@@ -46,9 +46,10 @@ jobs:
           files: |
             release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe
             release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe.blockmap
+            release/GameHub-portable-x64-${{ steps.version.outputs.version }}.zip
             release/latest.yml
             release/releases.json
             release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe.sha256
+            release/GameHub-portable-x64-${{ steps.version.outputs.version }}.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

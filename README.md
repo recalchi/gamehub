@@ -160,38 +160,96 @@ npx electron . --smoke-backup    # exports config, mungeds library, restores, ve
 All exit 0 on success, 1 on failure, with full log lines in
 `%APPDATA%/gamehub/logs/<date>.log`.
 
-## Windows release and auto-update
+## Windows installer and release
 
-GameHub now uses `electron-builder` + `electron-updater` with GitHub Releases
-as the update source (not branch sync and never `git pull` on end-user machines).
+GameHub uses `electron-builder` (NSIS) for a Windows x64 installer and
+`electron-updater` for release-based updates via GitHub Releases.
 
-### Build installer locally
+Important security model:
+- no `git pull` in end-user clients;
+- updates come from signed/versioned release artifacts;
+- updater rejects downgrade (`allowDowngrade=false`) and only uses allowlisted hosts.
+
+### Build commands
 
 ```powershell
+# Installer EXE (NSIS)
 npm run dist:win
+
+# Portable ZIP fallback
+npm run dist:win:portable
+
+# Full release bundle (installer + portable + manifest + SHA256)
+npm run dist:win:full
 ```
 
-Expected output in `release/`:
+Expected files under `release/`:
 - `GameHub-Setup-x64-<version>.exe`
+- `GameHub-Setup-x64-<version>.exe.blockmap`
+- `GameHub-portable-x64-<version>.zip`
 - `latest.yml`
-- `*.blockmap`
+- `releases.json`
+- `GameHub-Setup-x64-<version>.exe.sha256`
+- `GameHub-portable-x64-<version>.zip.sha256`
 
-### Publish a release
+### Publish GitHub release
 
 ```powershell
 npm run publish:win
 ```
 
-This publishes versioned artifacts to `https://github.com/recalchi/gamehub/releases`.
+Or use GitHub Actions by pushing a `v*` tag (workflow:
+`.github/workflows/release-win.yml`).
 
-### Runtime updater flow
+### Silent install / uninstall (NSIS)
+
+```powershell
+# silent install (per-user, no UAC)
+.\GameHub-Setup-x64-<version>.exe /S
+
+# optional custom path
+.\GameHub-Setup-x64-<version>.exe /S /D=%LocalAppData%\Programs\GameHub
+
+# silent uninstall
+"%LocalAppData%\Programs\GameHub\Uninstall GameHub.exe" /S
+```
+
+Installer defaults:
+- per-user install (`%LocalAppData%\Programs\GameHub`);
+- Start Menu shortcut;
+- desktop shortcut optional in UI flow;
+- uninstall removes binaries/shortcuts and keeps user data by default
+  (`deleteAppDataOnUninstall=false`).
+
+### Signing (prepared, optional for local builds)
+
+Build works without certificates. For production, sign installer and binaries:
+
+```powershell
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a release\GameHub-Setup-x64-<version>.exe
+signtool verify /pa /v release\GameHub-Setup-x64-<version>.exe
+```
+
+### SHA256 verification
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\release\GameHub-Setup-x64-<version>.exe
+Get-Content .\release\GameHub-Setup-x64-<version>.exe.sha256
+```
+
+### Auto-update runtime flow
 
 1. App opens normally.
-2. In background, updater checks `stable` release metadata.
-3. If newer version exists, updater downloads package automatically.
-4. Downloaded package is verified by updater metadata (`latest.yml` + signature/hash chain).
-5. User can install/restart from Settings > About, or update applies on next quit.
-6. On network/update errors, app keeps running and logs the issue.
+2. Updater checks releases in background.
+3. If update exists, package downloads automatically.
+4. UI shows states: checking, downloading, downloaded, install/restart.
+5. On failure, app continues running and logs the error.
+
+### SmartScreen note
+
+Even with valid Authenticode, new direct-download builds can still show
+SmartScreen warnings until reputation matures. Microsoft Store distribution is
+an optional later phase to reduce this friction.
 
 ## Legal
 

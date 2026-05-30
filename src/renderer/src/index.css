@@ -12,6 +12,43 @@
   -webkit-user-drag: none;
 }
 
+button,
+a,
+input,
+select,
+textarea,
+[role='button'],
+[data-no-drag='true'] {
+  -webkit-app-region: no-drag;
+}
+
+.window-drag-strip {
+  position: fixed;
+  top: 0;
+  left: 88px;
+  right: 160px;
+  height: 34px;
+  z-index: 60;
+  -webkit-app-region: drag;
+}
+
+.window-drag-corner {
+  position: fixed;
+  top: 0;
+  height: 64px;
+  width: 18px;
+  z-index: 60;
+  -webkit-app-region: drag;
+}
+
+.window-drag-corner-left {
+  left: 0;
+}
+
+.window-drag-corner-right {
+  right: 148px;
+}
+
 html,
 body,
 #root {
@@ -44,6 +81,52 @@ body,
   transform: translateY(-6px) scale(1.04);
   box-shadow: 0 24px 48px -12px rgba(34, 211, 238, 0.45),
     0 0 0 2px rgba(94, 234, 212, 0.85);
+}
+
+body[data-input-mode='gamepad'] [data-gamepad-focus='true'] {
+  outline: 2px solid rgb(var(--accent) / 0.85);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgb(var(--accent) / 0.12);
+}
+
+body[data-input-mode='gamepad'] a[data-gamepad-focus='true'],
+body[data-input-mode='gamepad'] button[data-gamepad-focus='true'] {
+  border-color: rgb(var(--accent) / 0.55);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.85);
+  outline-offset: 3px;
+}
+
+/* ===== Cinema player controls ===== */
+.cinema-range {
+  height: 6px;
+  cursor: pointer;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgb(var(--accent) / 0.9), rgb(255 255 255 / 0.18));
+}
+
+.cinema-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.16);
+}
+
+.cinema-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: 2px solid rgb(6 8 12);
+  border-radius: 999px;
+  background: rgb(var(--accent));
+  box-shadow: 0 0 18px rgb(var(--accent) / 0.7);
 }
 
 /* ===== Glassmorphism utility ===== */
@@ -80,4 +163,23 @@ body,
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.splash-console-grid {
+  background-image:
+    linear-gradient(rgba(94, 234, 212, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94, 234, 212, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 45%, black 0%, transparent 72%);
+}
+
+.splash-scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.08) 0,
+    rgba(255, 255, 255, 0.08) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  mix-blend-mode: overlay;
 }

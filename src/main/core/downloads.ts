@@ -1,12 +1,17 @@
 import { createWriteStream } from 'node:fs'
-import { mkdir, stat, unlink } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { copyFile, mkdir, readdir, stat, unlink } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { basename, extname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import { PATHS } from './paths'
 import { addManualGame } from './manualGames'
+import { libraryStore } from './store'
+import { coverUrl } from './covers'
+import { detectArchiveFormat, extractArchive } from './archiveTools'
 import { log } from './logger'
 import { IPC } from '@shared/ipc'
+import { PLATFORMS } from '@shared/platforms'
 import type { Game, PlatformId } from '@shared/types'
 
 export interface StartDownloadInput {
@@ -170,13 +175,53 @@ async function runDownload(
     const finalStat = await stat(filePath)
     log.info('downloads', `${id}: done ${received} bytes`)
 
+    // If the download is actually an archive (zip/7z), extract it and
+    // register the ROM/executable inside. Most homebrew distributes the game
+    // in an archive alongside a manual/cover. We detect by magic bytes —
+    // some hosts serve files without a proper extension in the URL.
+    let registerPath = filePath
+    let bundledCover: string | null = null
+    const format = await detectArchiveFormat(filePath)
+    if (format === 'zip' || format === '7z') {
+      const extracted = await extractAndFindRom(filePath, input.platform)
+      if (extracted.rom) {
+        log.info('downloads', `${id}: extracted ROM (${format}) → ${extracted.rom}`)
+        registerPath = extracted.rom
+        bundledCover = extracted.cover
+        // Clean up the original archive so we don't pollute Library with a
+        // duplicate "corrupted" entry from a later scan.
+        await unlink(filePath).catch(() => {})
+      } else {
+        log.warn(
+          'downloads',
+          `${id}: ${format} extraction yielded no recognized ROM for ${input.platform}`
+        )
+      }
+    }
+
     // Register as a library entry
     const r2 = addManualGame({
       title: input.title,
-      path: filePath,
+      path: registerPath,
       platform: input.platform
     })
     const gameId = 'error' in r2 ? undefined : r2.id
+
+    // If we found a cover image inside the archive, copy it into the managed
+    // covers dir and attach to the game so the card stops showing the
+    // placeholder.
+    if (gameId && bundledCover) {
+      const ext = extname(bundledCover).toLowerCase().replace('.', '') || 'png'
+      const dest = join(PATHS.covers, `${gameId}.${ext}`)
+      try {
+        await copyFile(bundledCover, dest)
+        const url = coverUrl(`${gameId}.${ext}`)
+        libraryStore.patchGame(gameId, { cover: url })
+        log.info('downloads', `${id}: bundled cover → ${dest}`)
+      } catch (err) {
+        log.warn('downloads', `${id}: failed to copy bundled cover: ${String(err)}`)
+      }
+    }
 
     publish({
       id,
@@ -186,7 +231,7 @@ async function runDownload(
       received: finalStat.size,
       total: finalStat.size,
       speed: 0,
-      filePath,
+      filePath: registerPath,
       gameId
     })
   } catch (err) {
@@ -210,6 +255,91 @@ function publish(p: DownloadProgress): void {
     win.webContents.send(IPC.downloads.progress, p)
   }
 }
+
+/** Image extensions we'll harvest as game cover candidates. */
+const COVER_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp'])
+/** Filename hints (case-insensitive) that strongly suggest a cover/box art. */
+const COVER_HINTS = ['cover', 'box', 'front', 'label', 'art', 'banner', 'screen']
+
+/**
+ * Extract a downloaded archive and find both the playable game file and a
+ * cover image candidate. ROM is the largest file with a platform-matching
+ * extension. Cover is the largest image matching cover-hint patterns
+ * (`label_nes.png` etc) or any image file as fallback.
+ */
+async function extractAndFindRom(
+  archivePath: string,
+  platform: PlatformId
+): Promise<{ rom: string | null; cover: string | null }> {
+  const def = PLATFORMS[platform]
+  if (!def) return { rom: null, cover: null }
+  const validExts = new Set(def.extensions.map((e) => `.${e.toLowerCase()}`))
+
+  // Extract next to the archive into a subdir named after the file stem
+  const destDir =
+    archivePath.substring(0, archivePath.lastIndexOf('.')) || archivePath + '-extracted'
+
+  const ok = await extractArchive(archivePath, destDir)
+  if (!ok) {
+    log.warn('downloads', `archive extraction failed for ${archivePath}`)
+    return { rom: null, cover: null }
+  }
+
+  let bestRom: string | null = null
+  let bestRomSize = 0
+  let bestCoverHit: string | null = null
+  let bestCoverHitSize = 0
+  let bestCoverAny: string | null = null
+  let bestCoverAnySize = 0
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 4) return
+    let entries: string[]
+    try {
+      entries = await readdir(dir)
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry)
+      let st
+      try {
+        st = await stat(full)
+      } catch {
+        continue
+      }
+      if (st.isDirectory()) {
+        await walk(full, depth + 1)
+        continue
+      }
+      const ext = extname(entry).toLowerCase()
+      // ROM candidate: largest file with platform-matching extension
+      if (validExts.has(ext) && st.size > bestRomSize) {
+        bestRomSize = st.size
+        bestRom = full
+      }
+      // Cover candidate: prefer files with cover-hint names, else any image
+      if (COVER_EXTENSIONS.has(ext)) {
+        const lower = entry.toLowerCase()
+        const hinted = COVER_HINTS.some((h) => lower.includes(h))
+        if (hinted && st.size > bestCoverHitSize) {
+          bestCoverHitSize = st.size
+          bestCoverHit = full
+        }
+        if (st.size > bestCoverAnySize) {
+          bestCoverAnySize = st.size
+          bestCoverAny = full
+        }
+      }
+    }
+  }
+  if (existsSync(destDir)) await walk(destDir, 0)
+  return {
+    rom: bestRom,
+    cover: bestCoverHit ?? bestCoverAny
+  }
+}
+
 
 function sanitize(s: string): string {
   return s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 80) || 'download'

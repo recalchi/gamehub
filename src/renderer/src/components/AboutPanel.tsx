@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
+  AlertCircle,
   CheckCircle2,
   Cloud,
   CloudOff,
+  Download,
   ExternalLink,
   FolderOpen,
   Info,
@@ -14,18 +16,20 @@ import type { AppInfo, UpdateInfo } from '@shared/types'
 /**
  * Top-of-Settings diagnostic + update card.
  *
- * The card is intentionally dense — it's the place we point users to when
- * something is wrong ("paste the diagnostic block from here"). Update check
- * is opt-in via the button; we don't auto-check on every Settings open to
- * keep things offline-friendly.
+ * Update check is non-blocking: app opens normally, updater runs in the
+ * background, and this panel only reflects state/progress.
  */
 export default function AboutPanel(): JSX.Element {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [checking, setChecking] = useState(false)
+  const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     void window.api.system.about().then(setInfo)
+    void window.api.system.updateState().then(setUpdate)
+    const off = window.api.system.onUpdateStatus(setUpdate)
+    return off
   }, [])
 
   async function check(): Promise<void> {
@@ -34,7 +38,17 @@ export default function AboutPanel(): JSX.Element {
     setChecking(false)
   }
 
-  if (!info) return <div className="text-slate-500 text-sm">Carregando informações…</div>
+  async function installNow(): Promise<void> {
+    setInstalling(true)
+    const result = await window.api.system.installUpdate()
+    if ('error' in result) {
+      setUpdate((prev) => (prev ? { ...prev, phase: 'error', error: result.error } : prev))
+      setInstalling(false)
+      return
+    }
+  }
+
+  if (!info) return <div className="text-slate-500 text-sm">Carregando informacoes...</div>
 
   return (
     <section className="glass rounded-2xl p-6 mb-6">
@@ -54,14 +68,12 @@ export default function AboutPanel(): JSX.Element {
           className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded-md flex items-center gap-1.5 disabled:opacity-50"
         >
           {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-          Checar atualização
+          Checar atualizacao
         </button>
       </header>
 
-      {/* Update banner */}
-      {update && <UpdateRow info={update} />}
+      {update && <UpdateRow info={update} onInstall={installNow} installing={installing} />}
 
-      {/* Stats grid */}
       <dl className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
         <Stat label="Jogos" value={info.stats.games} />
         <Stat label="Prontos" value={info.stats.readyGames} tone="ok" />
@@ -70,7 +82,6 @@ export default function AboutPanel(): JSX.Element {
         <Stat label="Snapshots de save" value={info.stats.saveSnapshots} />
       </dl>
 
-      {/* Path table */}
       <div className="mt-5 border-t border-white/5 pt-4 space-y-1.5">
         {Object.entries(info.paths).map(([k, v]) => (
           <PathRow key={k} label={k} path={v} />
@@ -107,29 +118,92 @@ function PathRow({ label, path }: { label: string; path: string }): JSX.Element 
   )
 }
 
-function UpdateRow({ info }: { info: UpdateInfo }): JSX.Element {
-  if (info.error) {
+function UpdateRow({
+  info,
+  onInstall,
+  installing
+}: {
+  info: UpdateInfo
+  onInstall: () => void
+  installing: boolean
+}): JSX.Element {
+  if (info.phase === 'disabled') {
     return (
       <div className="flex items-center gap-2 text-xs text-slate-400 bg-ink-800/60 px-3 py-2 rounded-md">
         <CloudOff className="w-3.5 h-3.5" />
+        Updater desabilitado neste modo (dev/build local).
+      </div>
+    )
+  }
+
+  if (info.error) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-200 bg-rose-500/10 border border-rose-500/25 px-3 py-2 rounded-md">
+        <AlertCircle className="w-3.5 h-3.5 text-rose-300" />
         <span>
-          Não foi possível checar agora: <code className="text-slate-500">{info.error}</code>
+          Nao foi possivel atualizar agora: <code className="text-slate-400">{info.error}</code>
         </span>
       </div>
     )
   }
+
+  if (info.phase === 'checking') {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-300 bg-white/5 px-3 py-2 rounded-md">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        Verificando atualizacoes em segundo plano...
+      </div>
+    )
+  }
+
+  if (info.phase === 'downloading') {
+    return (
+      <div className="flex items-center justify-between gap-3 text-xs bg-sky-500/10 border border-sky-400/30 px-3 py-2 rounded-md">
+        <div className="flex items-center gap-2">
+          <Download className="w-3.5 h-3.5 text-sky-300" />
+          <span>
+            Baixando atualizacao{info.latest ? ` v${info.latest}` : ''}: {Math.round(info.percent ?? 0)}%
+          </span>
+        </div>
+        <span className="text-slate-400">
+          {formatBytes(info.downloadedBytes)} / {formatBytes(info.totalBytes)}
+        </span>
+      </div>
+    )
+  }
+
+  if (info.phase === 'downloaded' && info.latest) {
+    return (
+      <div className="flex items-center justify-between gap-3 text-sm bg-emerald-500/12 border border-emerald-400/35 px-3 py-2 rounded-md">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+          <span>
+            Atualizacao pronta: <strong>v{info.latest}</strong>
+          </span>
+        </div>
+        <button
+          onClick={onInstall}
+          disabled={installing}
+          className="text-xs px-2.5 py-1.5 rounded-md bg-emerald-400/20 hover:bg-emerald-400/30 disabled:opacity-60"
+        >
+          {installing ? 'Instalando...' : 'Instalar e reiniciar'}
+        </button>
+      </div>
+    )
+  }
+
   if (info.newer && info.latest) {
     return (
       <div className="flex items-center justify-between gap-3 text-sm bg-accent/15 border border-accent/40 px-3 py-2 rounded-md">
         <div className="flex items-center gap-2">
           <Cloud className="w-4 h-4 text-accent" />
           <span>
-            Nova versão disponível: <strong>v{info.latest}</strong>
+            Nova versao disponivel: <strong>v{info.latest}</strong>
           </span>
         </div>
         {info.releaseUrl && (
           <button
-            onClick={() => window.api.system.openExternal(info.releaseUrl!)}
+            onClick={() => info.releaseUrl && window.api.system.openExternal(info.releaseUrl)}
             className="text-xs text-accent hover:underline flex items-center gap-1"
           >
             Ver release <ExternalLink className="w-3 h-3" />
@@ -138,9 +212,22 @@ function UpdateRow({ info }: { info: UpdateInfo }): JSX.Element {
       </div>
     )
   }
+
   return (
     <div className="flex items-center gap-2 text-xs text-emerald-300">
-      <CheckCircle2 className="w-3.5 h-3.5" /> Você está na versão mais recente (v{info.current}).
+      <CheckCircle2 className="w-3.5 h-3.5" /> Voce esta na versao mais recente (v{info.current}).
     </div>
   )
+}
+
+function formatBytes(value?: number): string {
+  if (!value || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let n = value
+  let idx = 0
+  while (n >= 1024 && idx < units.length - 1) {
+    n /= 1024
+    idx += 1
+  }
+  return `${n.toFixed(n >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`
 }

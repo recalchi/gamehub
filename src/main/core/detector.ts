@@ -48,7 +48,22 @@ export function detectPlatform(filePath: string): DetectionResult {
   }
 
   // 1. Path hint scan
-  const pathHint = PATH_HINTS.find((h) => h.pattern.test(lower))
+  let pathHint = PATH_HINTS.find((h) => h.pattern.test(lower))
+
+  // 1b. Xbox folders are often named just "XBOX" but contain 360 dumps. The
+  // original Xbox DVD format caps at ~6.8GB; anything bigger has to be 360.
+  // Promote `xbox` → `xbox360` when the file is suspiciously large for OG.
+  if (pathHint?.platform === 'xbox' && ext === 'iso' && existsSync(filePath)) {
+    try {
+      const st = statSync(filePath)
+      if (st.isFile() && st.size > 7 * 1024 * 1024 * 1024) {
+        pathHint = { pattern: /./, platform: 'xbox360' }
+        flags.push('ISO > 7GB — promovido para Xbox 360')
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Archives are surfaced but flagged as needing extraction
   if (ARCHIVE_EXTENSIONS.has(ext)) {
@@ -79,9 +94,10 @@ export function detectPlatform(filePath: string): DetectionResult {
         }
       }
       if (ambiguous) {
-        // ISO without a hint — best guess is PS2 (most common in modern dumps)
         flags.push('extensão genérica — confirme a plataforma manualmente')
-        return { platform: 'ps2', confidence: 0.45, flags }
+        // .pkg defaults to PS3 (more common than PS4 pkg dumps); .iso defaults to PS2.
+        const fallback: PlatformId = ext === 'pkg' ? 'ps3' : 'ps2'
+        return { platform: fallback, confidence: 0.45, flags }
       }
       return { platform: platform.id, confidence: 0.95, flags }
     }
@@ -94,7 +110,7 @@ export function detectPlatform(filePath: string): DetectionResult {
   }
 
   // 4. PC executable in well-known PC roots
-  if (ext === 'exe' || ext === 'bat' || ext === 'lnk') {
+  if (ext === 'exe' || ext === 'bat' || ext === 'cmd' || ext === 'lnk') {
     return { platform: 'pc', confidence: 0.6, flags }
   }
 

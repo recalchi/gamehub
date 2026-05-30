@@ -89,7 +89,7 @@ export default function AddGameModal({ open, onClose, onAdded, initialPath }: Pr
   async function pickFile(): Promise<void> {
     const filters =
       platform === 'pc'
-        ? [{ name: 'Executável', extensions: ['exe', 'bat', 'lnk', 'url'] }]
+        ? [{ name: 'Executável', extensions: ['exe', 'bat', 'cmd', 'lnk', 'url'] }]
         : [{ name: 'Qualquer arquivo', extensions: ['*'] }]
     const p = await window.api.system.pickFile(filters)
     if (!p) return
@@ -97,6 +97,16 @@ export default function AddGameModal({ open, onClose, onAdded, initialPath }: Pr
     if (!title.trim()) {
       const base = p.split(/[\\/]/).pop() ?? p
       setTitle(base.replace(/\.[^.]+$/, ''))
+    }
+  }
+
+  async function pickFolderPath(): Promise<void> {
+    const p = await window.api.system.pickFolder()
+    if (!p) return
+    setPath(p)
+    if (!title.trim()) {
+      const base = p.split(/[\\/]/).pop() ?? p
+      setTitle(base)
     }
   }
 
@@ -244,6 +254,16 @@ export default function AddGameModal({ open, onClose, onAdded, initialPath }: Pr
                     >
                       <File className="w-3.5 h-3.5" /> Procurar
                     </button>
+                    {platform === 'pc' && (
+                      <button
+                        type="button"
+                        onClick={pickFolderPath}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-md text-xs flex items-center gap-1.5"
+                        title="Selecionar pasta do jogo (GameHub escolhe launcher automaticamente)"
+                      >
+                        <HardDrive className="w-3.5 h-3.5" /> Pasta
+                      </button>
+                    )}
                   </div>
                 </Field>
 

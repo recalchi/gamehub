@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
-import { Gamepad2, RefreshCw, Save, Zap } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import RouteTransition from '../components/RouteTransition'
+import PageHeader from '../components/PageHeader'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Gamepad2,
+  Keyboard,
+  MonitorCog,
+  RefreshCw,
+  Save,
+  Zap
+} from 'lucide-react'
 import { useLibraryStore } from '../store/library'
+import type { ControllerDiagnostics, NativeControllerDevice } from '@shared/types'
 
 interface PadSnapshot {
   index: number
@@ -28,9 +40,24 @@ export default function Controllers(): JSX.Element {
   const settings = useLibraryStore((s) => s.settings)
   const save = useLibraryStore((s) => s.saveSettings)
   const [pads, setPads] = useState<PadSnapshot[]>([])
+  const [diagnostics, setDiagnostics] = useState<ControllerDiagnostics | null>(null)
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
   const raf = useRef<number | null>(null)
   const flashRef = useRef<Map<string, number>>(new Map())
   const [, force] = useState(0)
+
+  const refreshNativeDiagnostics = useCallback(async (): Promise<void> => {
+    setDiagnosticsLoading(true)
+    try {
+      setDiagnostics(await window.api.controllers.diagnostics())
+    } finally {
+      setDiagnosticsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshNativeDiagnostics()
+  }, [refreshNativeDiagnostics])
 
   useEffect(() => {
     function poll(): void {
@@ -77,19 +104,19 @@ export default function Controllers(): JSX.Element {
   const selected = pads.find((p) => p.id === input.preferredGamepadId)
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="px-12 py-12 max-w-5xl"
-    >
-      <h1 className="text-3xl font-display font-bold mb-2 flex items-center gap-3">
-        <Gamepad2 className="w-8 h-8 text-accent" /> Controles
-      </h1>
-      <p className="text-slate-400 mb-10">
-        Conecte um controle USB ou Bluetooth e pressione qualquer botão. O navegador
-        detecta automaticamente. Para PS5/Switch Pro use modo XInput se possível.
-      </p>
+    <RouteTransition className="px-12 py-12 max-w-5xl">
+      <PageHeader
+        title="Controles"
+        icon={Gamepad2}
+        subtitle="Conecte um controle USB ou Bluetooth e pressione qualquer botão. O navegador detecta automaticamente. Para PS5/Switch Pro use modo XInput se possível."
+      />
+
+      <NativeDiagnosticsPanel
+        diagnostics={diagnostics}
+        loading={diagnosticsLoading}
+        webGamepadCount={pads.length}
+        onRefresh={refreshNativeDiagnostics}
+      />
 
       {/* Detected pads */}
       <section className="glass rounded-2xl p-6 mb-6">
@@ -124,7 +151,10 @@ export default function Controllers(): JSX.Element {
         )}
 
         <button
-          onClick={() => force((x) => x + 1)}
+          onClick={() => {
+            force((x) => x + 1)
+            void refreshNativeDiagnostics()
+          }}
           className="mt-4 text-xs flex items-center gap-1.5 text-slate-400 hover:text-white"
         >
           <RefreshCw className="w-3 h-3" /> Atualizar lista
@@ -191,8 +221,213 @@ export default function Controllers(): JSX.Element {
           />
         </div>
       </section>
-    </motion.div>
+    </RouteTransition>
   )
+}
+
+function NativeDiagnosticsPanel({
+  diagnostics,
+  loading,
+  webGamepadCount,
+  onRefresh
+}: {
+  diagnostics: ControllerDiagnostics | null
+  loading: boolean
+  webGamepadCount: number
+  onRefresh: () => Promise<void>
+}): JSX.Element {
+  const gameSirDevices = diagnostics?.devices.filter((device) =>
+    /gamesir|vid_36ae|vid_3537/i.test(`${device.name} ${device.pnpDeviceId}`)
+  )
+  const xinputConnected = diagnostics?.xinput.some((slot) => slot.connected) ?? false
+  const hidOnlyGameSir =
+    (gameSirDevices?.length ?? 0) > 0 &&
+    !xinputConnected &&
+    gameSirDevices?.some((device) =>
+      /keyboard|teclado|mouse|consumer control|wireless radio|vendor-defined/i.test(
+        `${device.name} ${device.busReportedDescription ?? ''} ${device.pnpClass ?? ''}`
+      )
+    )
+  const status = xinputConnected
+    ? {
+        icon: CheckCircle2,
+        title: 'Controle pronto em XInput',
+        detail: 'O Windows ja expos um controle compativel com jogos de PC.'
+      }
+    : hidOnlyGameSir
+      ? {
+          icon: Keyboard,
+          title: 'GameSir em modo teclado/HID',
+          detail:
+            'O controle esta conectado, mas o GameHub nao consegue usar como gamepad ate trocar para XInput.'
+        }
+      : {
+          icon: AlertTriangle,
+          title: 'Aguardando controle em modo gamepad',
+          detail: 'Pressione um botao, reconecte o cabo/dongle ou troque o modo do controle.'
+        }
+  const StatusIcon = status.icon
+  const appCount = countGameSirApps(diagnostics)
+
+  return (
+    <section className="glass rounded-2xl p-6 mb-6 border border-white/5">
+      <header className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start gap-3">
+          <div
+            className={`mt-0.5 rounded-lg p-2 ${
+              xinputConnected
+                ? 'bg-emerald-400/15 text-emerald-300'
+                : hidOnlyGameSir
+                  ? 'bg-amber-400/15 text-amber-300'
+                  : 'bg-white/10 text-slate-300'
+            }`}
+          >
+            <StatusIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-display font-semibold text-lg">{status.title}</h2>
+            <p className="text-sm text-slate-400 mt-1">{status.detail}</p>
+          </div>
+        </div>
+        <button
+          onClick={() => void onRefresh()}
+          className="shrink-0 inline-flex items-center gap-2 rounded-md bg-white/5 px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Diagnosticar
+        </button>
+      </header>
+
+      <div className="grid md:grid-cols-3 gap-3 mb-4">
+        <Metric
+          label="Gamepads no GameHub"
+          value={String(webGamepadCount)}
+          tone={webGamepadCount > 0 ? 'ok' : 'warn'}
+        />
+        <Metric
+          label="XInput ativo"
+          value={xinputConnected ? 'sim' : 'nao'}
+          tone={xinputConnected ? 'ok' : 'warn'}
+        />
+        <Metric
+          label="Apps GameSir"
+          value={String(appCount)}
+          tone={appCount > 0 ? 'ok' : 'warn'}
+        />
+      </div>
+
+      {diagnostics?.issues.length ? (
+        <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-4 mb-4">
+          <div className="text-xs uppercase tracking-wider text-amber-200 mb-2">
+            Ajuste recomendado
+          </div>
+          <ul className="space-y-1 text-sm text-amber-50/90">
+            {diagnostics.issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {diagnostics?.recommendations.length ? (
+        <div className="space-y-1.5 text-sm text-slate-300 mb-4">
+          {diagnostics.recommendations.map((recommendation) => (
+            <p key={recommendation}>{recommendation}</p>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="rounded-lg border border-white/5 bg-ink-800/70 p-4 mb-4">
+        <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">
+          GameSir T4n Lite / Nova Lite
+        </div>
+        <div className="space-y-1.5 text-sm text-slate-300">
+          <p>Para PC via dongle: desligue o controle, conecte o receptor USB e ligue com X + Home.</p>
+          <p>Para cabo USB-C: use um cabo de dados; cabo apenas de carga pode deixar so a luz verde.</p>
+          <p>O GameSir Connect nao suporta Nova Lite; use o app somente se o manual/firmware do seu lote indicar.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <StoreButton label="GameSir Connect" productId="XPFMNZ2F440G2L" />
+          <StoreButton label="GameSir Nexus" productId="9PMJKF5NSTDR" />
+        </div>
+      </div>
+
+      {gameSirDevices && gameSirDevices.length > 0 ? (
+        <div>
+          <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">
+            Dispositivo GameSir no Windows
+          </div>
+          <ul className="space-y-2">
+            {gameSirDevices.map((device) => (
+              <NativeDeviceRow key={device.pnpDeviceId} device={device} />
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="text-xs text-slate-500">
+          Nenhum dispositivo GameSir identificado pelo diagnostico nativo.
+        </div>
+      )}
+    </section>
+  )
+}
+
+function Metric({
+  label,
+  value,
+  tone
+}: {
+  label: string
+  value: string
+  tone: 'ok' | 'warn'
+}): JSX.Element {
+  return (
+    <div className="rounded-lg bg-ink-800/70 border border-white/5 px-3 py-3">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div
+        className={
+          tone === 'ok' ? 'text-emerald-300 font-semibold' : 'text-amber-300 font-semibold'
+        }
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function StoreButton({ label, productId }: { label: string; productId: string }): JSX.Element {
+  return (
+    <button
+      onClick={() => window.api.system.openExternal(`ms-windows-store://pdp/?ProductId=${productId}`)}
+      className="inline-flex items-center gap-2 rounded-md bg-white/5 px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
+    >
+      <ExternalLink className="w-3.5 h-3.5" />
+      Abrir {label}
+    </button>
+  )
+}
+
+function NativeDeviceRow({ device }: { device: NativeControllerDevice }): JSX.Element {
+  return (
+    <li className="rounded-lg bg-ink-800/70 border border-white/5 px-3 py-3">
+      <div className="flex items-start gap-3">
+        <MonitorCog className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-100 truncate">
+            {device.busReportedDescription || device.name}
+          </div>
+          <div className="text-[11px] text-slate-500 font-mono mt-1 break-all">
+            {device.name} | {device.status} | {device.pnpClass ?? 'sem classe'} |{' '}
+            {device.pnpDeviceId}
+          </div>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function countGameSirApps(diagnostics: ControllerDiagnostics | null): number {
+  return diagnostics?.companionApps.filter((app) => /gamesir/i.test(app.name)).length ?? 0
 }
 
 function PadCard({

@@ -12,12 +12,54 @@
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "build:win": "electron-vite build && electron-builder --win --dir",
+    "dist:win": "electron-vite build && electron-builder --win nsis",
+    "manifest:win": "node scripts/generate-update-manifest.mjs",
+    "publish:win": "electron-vite build && electron-builder --win nsis --publish always",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
   },
+  "build": {
+    "appId": "com.recalchi.gamehub",
+    "productName": "GameHub",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "recalchi",
+        "repo": "gamehub",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "GameHub-Setup-${arch}-${version}.${ext}",
+      "verifyUpdateCodeSignature": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "runAfterFinish": true
+    }
+  },
   "dependencies": {
     "electron-store": "^10.0.1",
+    "electron-updater": "^6.8.3",
+    "ffmpeg-static": "^5.3.0",
     "framer-motion": "^11.15.0",
     "fuse.js": "^7.0.0",
     "lucide-react": "^0.469.0",

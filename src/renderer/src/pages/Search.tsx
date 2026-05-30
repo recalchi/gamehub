@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
+import RouteTransition from '../components/RouteTransition'
 import { Link } from 'react-router-dom'
 import Fuse from 'fuse.js'
 import { Search as SearchIcon } from 'lucide-react'
@@ -30,12 +30,7 @@ export default function SearchPage(): JSX.Element {
   const results = q.trim() === '' ? games.slice(0, 30) : fuse.search(q).map((r) => r.item)
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="px-12 py-12"
-    >
+    <RouteTransition className="px-12 py-12">
       <div className="glass rounded-2xl p-4 flex items-center gap-3 max-w-3xl mx-auto">
         <SearchIcon className="w-5 h-5 text-accent" />
         <input
@@ -55,6 +50,6 @@ export default function SearchPage(): JSX.Element {
           </Link>
         ))}
       </div>
-    </motion.div>
+    </RouteTransition>
   )
 }

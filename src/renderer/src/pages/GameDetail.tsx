@@ -1,39 +1,69 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
+import { layoutSpring } from '../motion/tokens'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
+  Award,
   Check,
   Clock,
+  Download,
+  ExternalLink,
+  FileText,
   FolderOpen,
   Heart,
   HelpCircle,
+  Loader2,
   Lock,
   Pencil,
   Play,
+  Square,
   Settings as SettingsIcon,
+  Sliders,
   Trash2,
   X
 } from 'lucide-react'
 import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 import { EMULATORS } from '@shared/emulators'
-import type { Game } from '@shared/types'
+import type { Game, GameAchievementDetail } from '@shared/types'
 import SaveManagerPanel from '../components/SaveManagerPanel'
 import BiosPanel from '../components/BiosPanel'
+import CrashHistoryPanel from '../components/CrashHistoryPanel'
+import EmulatorPicker from '../components/EmulatorPicker'
 import MetadataEditor from '../components/MetadataEditor'
 import TagEditor from '../components/TagEditor'
+import GameBackdrop from '../components/GameBackdrop'
+import PerformancePanel from '../components/PerformancePanel'
 
 export default function GameDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const games = useLibraryStore((s) => s.games)
   const emulators = useLibraryStore((s) => s.emulators)
+  const dynamicBackgrounds = useLibraryStore(
+    (s) => s.settings?.appearance.dynamicGameBackgrounds ?? true
+  )
+  const backgroundPreset = useLibraryStore(
+    (s) => s.settings?.appearance.gameBackgroundPreset ?? 'vibrant'
+  )
+  const showPerformancePanel = useLibraryStore(
+    (s) => s.settings?.performance.showOnGameDetail ?? true
+  )
   const toggleFavorite = useLibraryStore((s) => s.toggleFavorite)
   const launch = useLibraryStore((s) => s.launch)
+  const terminate = useLibraryStore((s) => s.terminate)
+  const reload = useLibraryStore((s) => s.reload)
   const game = games.find((g) => g.id === id)
   const [launchMsg, setLaunchMsg] = useState<string | null>(null)
+  const [achievements, setAchievements] = useState<GameAchievementDetail | null>(null)
+  const [isActive, setIsActive] = useState(false)
+  // Tabbed lower panel — keeps the play button close to the top while still
+  // letting the user reach BIOS/emulator/metadata/crashes without scrolling.
+  type DetailTab = 'setup' | 'history' | 'achievements' | 'details'
+  const [tab, setTab] = useState<DetailTab>('setup')
 
   useEffect(() => {
     if (!game) return
@@ -45,6 +75,31 @@ export default function GameDetail(): JSX.Element {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.id])
+
+  useEffect(() => {
+    if (!game) return
+    void window.api.achievements.game(game.id).then(setAchievements)
+  }, [game?.id])
+
+  useEffect(() => {
+    if (!game) return
+    let mounted = true
+    void window.api.launch.active().then((list) => {
+      if (!mounted) return
+      setIsActive(list.some((entry) => entry.gameId === game.id))
+    })
+    const offStarted = window.api.launch.onStarted((entry) => {
+      if (entry.gameId === game.id) setIsActive(true)
+    })
+    const offEnded = window.api.launch.onEnded((entry) => {
+      if (entry.gameId === game.id) setIsActive(false)
+    })
+    return () => {
+      mounted = false
+      offStarted()
+      offEnded()
+    }
   }, [game?.id])
 
   if (!game) {
@@ -62,25 +117,31 @@ export default function GameDetail(): JSX.Element {
     setTimeout(() => setLaunchMsg(null), 4000)
   }
 
+  async function onTerminate(): Promise<void> {
+    setLaunchMsg('Encerrando jogo...')
+    const r = await terminate(game!.id)
+    setLaunchMsg(r.ok ? r.note ?? 'Encerrado.' : r.error ?? 'Falha ao encerrar.')
+    setTimeout(() => setLaunchMsg(null), 4500)
+  }
+
   const platform = PLATFORMS[game.platform]
   const emu = game.emulator ? emulators.find((e) => e.id === game.emulator) : undefined
   const emuDef = game.emulator ? EMULATORS[game.emulator] : undefined
   const playMinutes = Math.round((game.playTime ?? 0) / 60)
 
   return (
+    // Plain fade — sharedElementVariants is gated on shared-layout being
+    // active (mode=popLayout) but that broke layout for the rest of the app,
+    // so we fell back to mode=wait and let the detail use the default page
+    // transition. The cover layoutId still gives a nice spring within the
+    // page; just doesn't cross-fly from the card anymore.
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: 0.18 } }}
+      exit={{ opacity: 0, transition: { duration: 0.14 } }}
       className="relative min-h-full"
     >
-      {/* Hero background */}
-      <div
-        className="absolute inset-x-0 top-0 h-[60vh] -z-0"
-        style={{
-          background: `radial-gradient(ellipse at 30% 0%, ${platform.color}66 0%, transparent 60%), linear-gradient(180deg, ${platform.color}22, transparent)`
-        }}
-      />
+      <GameDetailBackdrop game={game} dynamic={dynamicBackgrounds} preset={backgroundPreset} />
       <div className="relative z-10 px-12 pt-8 pb-16">
         <button
           onClick={() => navigate(-1)}
@@ -90,9 +151,12 @@ export default function GameDetail(): JSX.Element {
         </button>
 
         <div className="flex gap-10">
-          {/* Cover + cover actions */}
+          {/* Cover + cover actions — layoutId matches the GameCard so Framer
+              animates the card's cover flying out into this hero position. */}
           <div className="shrink-0">
-            <div
+            <motion.div
+              layoutId={`game-cover-${game.id}`}
+              transition={layoutSpring}
               className="w-72 h-[26rem] rounded-2xl overflow-hidden border border-white/10 shadow-2xl"
               style={{
                 background: game.cover
@@ -110,7 +174,7 @@ export default function GameDetail(): JSX.Element {
                   </div>
                 </div>
               )}
-            </div>
+            </motion.div>
             <CoverActions gameId={game.id} hasCover={!!game.cover} />
           </div>
 
@@ -166,17 +230,18 @@ export default function GameDetail(): JSX.Element {
               )}
             </div>
 
-            {/* BIOS check */}
-            <div className="mt-3">
-              <BiosPanel emulatorId={game.emulator} />
-            </div>
-
-            <MetadataEditor game={game} />
-            <TagEditor game={game} />
-
-            {/* Actions */}
-            <div className="mt-8 flex gap-3 flex-wrap">
+            {/* Primary actions — moved up so the Play button isn't buried
+                under panels. Secondary actions stay visible too. */}
+            <div className="mt-5 flex gap-3 flex-wrap">
               <PrimaryButton game={game} onClick={onPlay} />
+              {isActive && (
+                <button
+                  onClick={() => void onTerminate()}
+                  className="px-5 py-3 bg-rose-500/90 text-white rounded-lg font-semibold flex items-center gap-2 hover:bg-rose-500 transition-colors"
+                >
+                  <Square className="w-4 h-4 fill-current" /> Encerrar jogo
+                </button>
+              )}
               <button
                 onClick={() => toggleFavorite(game.id)}
                 className="px-5 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all"
@@ -186,12 +251,6 @@ export default function GameDetail(): JSX.Element {
                 />
                 {game.favorite ? 'Favoritado' : 'Favoritar'}
               </button>
-              <Link
-                to="/settings"
-                className="px-5 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all"
-              >
-                <SettingsIcon className="w-4 h-4" /> Configurar emulador
-              </Link>
               <button
                 onClick={() => window.api.launch.folder(parentFolder(game.path))}
                 className="px-5 py-3 glass rounded-lg flex items-center gap-2 hover:bg-white/10 transition-all"
@@ -211,7 +270,6 @@ export default function GameDetail(): JSX.Element {
                     alert(`Falha: ${r.error}`)
                     return
                   }
-                  // Refresh in-memory store and go back
                   useLibraryStore.setState((s) => ({
                     games: s.games.filter((g) => g.id !== game.id)
                   }))
@@ -228,11 +286,45 @@ export default function GameDetail(): JSX.Element {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 text-sm text-accent"
+                className="mt-3 text-sm text-accent"
               >
                 {launchMsg}
               </motion.div>
             )}
+
+            <GameFileActions game={game} onChanged={() => void reload()} />
+
+            {/* Tabbed panel — groups the noisier sections so the page no
+                longer feels like a scroll dump. */}
+            <DetailTabs tab={tab} onChange={setTab} />
+            <div className="mt-4">
+              {tab === 'setup' && (
+                <div className="space-y-3">
+                  <EmulatorPicker game={game} onChanged={() => void reload()} />
+                  <BiosPanel emulatorId={game.emulator} onBiosInstalled={() => void reload()} />
+                  <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400 flex items-center gap-2">
+                    <SettingsIcon className="w-3.5 h-3.5 text-slate-500" />
+                    Atalhos:
+                    <Link to="/settings" className="text-accent hover:underline">
+                      configurações globais
+                    </Link>
+                  </div>
+                </div>
+              )}
+              {tab === 'history' && (
+                <div className="space-y-3">
+                  {showPerformancePanel && <PerformancePanel game={game} />}
+                  <CrashHistoryPanel gameId={game.id} />
+                </div>
+              )}
+              {tab === 'achievements' && <AchievementsPanel detail={achievements} />}
+              {tab === 'details' && (
+                <div className="space-y-3">
+                  <MetadataEditor game={game} />
+                  <TagEditor game={game} />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -246,6 +338,160 @@ export default function GameDetail(): JSX.Element {
         </section>
       </div>
     </motion.div>
+  )
+}
+
+/**
+ * Tab bar for the GameDetail right column. The actual content is rendered by
+ * the parent — this component just owns the visual switcher.
+ */
+function DetailTabs({
+  tab,
+  onChange
+}: {
+  tab: 'setup' | 'history' | 'achievements' | 'details'
+  onChange: (next: 'setup' | 'history' | 'achievements' | 'details') => void
+}): JSX.Element {
+  const tabs: Array<{
+    id: 'setup' | 'history' | 'achievements' | 'details'
+    label: string
+    icon: typeof Sliders
+  }> = [
+    { id: 'setup', label: 'Configurar', icon: Sliders },
+    { id: 'history', label: 'Histórico', icon: Activity },
+    { id: 'achievements', label: 'Conquistas', icon: Award },
+    { id: 'details', label: 'Detalhes', icon: FileText }
+  ]
+  return (
+    <div className="mt-6 border-b border-white/5 flex gap-1 overflow-x-auto">
+      {tabs.map((t) => {
+        const Icon = t.icon
+        const active = tab === t.id
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            className={`shrink-0 inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              active
+                ? 'border-accent text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {t.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function GameDetailBackdrop({
+  game,
+  dynamic,
+  preset
+}: {
+  game: Game
+  dynamic: boolean
+  preset: import('@shared/types').GameBackgroundPreset
+}): JSX.Element {
+  if (!dynamic) {
+    return (
+      <div
+        className="absolute inset-x-0 top-0 h-[60vh] z-0"
+        style={{
+          background:
+            'radial-gradient(ellipse at 30% 0%, rgb(var(--accent) / 0.36) 0%, transparent 60%), linear-gradient(180deg, rgb(var(--accent) / 0.14), transparent)'
+        }}
+      />
+    )
+  }
+
+  return <GameBackdrop game={game} preset={preset} />
+}
+
+function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null }): JSX.Element {
+  if (!detail) {
+    return (
+      <section id="achievements" className="mt-4 glass rounded-lg p-4 text-sm text-slate-400">
+        Carregando conquistas...
+      </section>
+    )
+  }
+
+  const ready = detail.summary.status === 'ready'
+  const preview = detail.achievements.slice(0, 6)
+
+  return (
+    <section id="achievements" className="mt-4 glass rounded-lg p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display font-semibold text-lg flex items-center gap-2">
+            <Award className="w-5 h-5 text-accent" /> Conquistas
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">{detail.summary.sourceDetail}</p>
+        </div>
+        <Link
+          to="/achievements"
+          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+        >
+          Central
+        </Link>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded bg-accent/15 px-2 py-1 text-accent">
+          {detail.summary.sourceLabel}
+        </span>
+        <span className="rounded bg-white/5 px-2 py-1 text-slate-300">
+          {detail.summary.total > 0 ? `${detail.summary.total} identificadas` : 'Sem lista local'}
+        </span>
+        {detail.summary.sourceUrl && (
+          <button
+            type="button"
+            onClick={() => window.api.system.openExternal(detail.summary.sourceUrl!)}
+            className="rounded bg-white/5 px-2 py-1 text-slate-300 hover:bg-white/10 inline-flex items-center gap-1"
+          >
+            <ExternalLink className="w-3 h-3" /> Fonte
+          </button>
+        )}
+      </div>
+
+      {ready ? (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+          {preview.map((achievement) => (
+            <div key={achievement.id} className="flex gap-3 rounded-lg bg-white/[0.04] p-2">
+              <div className="h-11 w-11 shrink-0 overflow-hidden rounded bg-white/5">
+                {achievement.icon ? (
+                  <img
+                    src={achievement.icon}
+                    alt={achievement.title}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center text-slate-500">
+                    <Award className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{achievement.title}</div>
+                {achievement.description && (
+                  <div className="text-[11px] text-slate-500 line-clamp-2">
+                    {achievement.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-slate-500">
+          Quando uma fonte confiavel estiver configurada ou cacheada, a lista aparece aqui automaticamente.
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -305,6 +551,70 @@ function CoverActions({ gameId, hasCover }: { gameId: string; hasCover: boolean 
 }
 
 /**
+ * Re-aim the game at a different file. Vital for PS4 games where the user
+ * extracts the pkg with an external tool (PS4 PKG Tool, etc) and ends up
+ * with an eboot.bin somewhere — point the library entry there and the
+ * launcher pipeline picks it up without recreating the entry.
+ *
+ * Also useful when a user has the same ROM in two locations and wants to
+ * swap which one is canonical.
+ */
+function GameFileActions({ game, onChanged }: { game: Game; onChanged: () => void }): JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  async function repoint(): Promise<void> {
+    // Filters tuned per platform. PS4 wants eboot.bin or the pkg; PS3 wants
+    // either; rest gets "any executable / image" — keep the picker permissive.
+    const filters =
+      game.platform === 'ps4'
+        ? [
+            { name: 'shadPS4 eboot ou .pkg', extensions: ['bin', 'pkg', 'elf'] },
+            { name: 'Todos os arquivos', extensions: ['*'] }
+          ]
+        : [
+            { name: 'Imagem/Exe/Pacote', extensions: ['iso', 'bin', 'cue', 'chd', 'pkg', 'exe', 'elf'] },
+            { name: 'Todos os arquivos', extensions: ['*'] }
+          ]
+    const path = await window.api.system.pickFile(filters)
+    if (!path) return
+    setBusy(true)
+    const r = await window.api.library.update(game.id, { path })
+    setBusy(false)
+    if (r) {
+      setMsg(`Apontado para: ${path}`)
+      setTimeout(() => setMsg(null), 4000)
+      onChanged()
+    } else {
+      setMsg('Falha ao atualizar.')
+      setTimeout(() => setMsg(null), 3000)
+    }
+  }
+
+  // Show only when there's a likely reason to repoint:
+  // PS4 (almost always needed because of pkg→eboot dance),
+  // or any game whose status isn't 'ready'.
+  const helpful =
+    game.platform === 'ps4' || game.status !== 'ready' || game.path?.toLowerCase().endsWith('.pkg')
+  if (!helpful) return <></>
+
+  return (
+    <div className="mt-3 text-xs">
+      <button
+        onClick={repoint}
+        disabled={busy}
+        data-ui-sound="toggle"
+        className="text-slate-300 hover:text-accent inline-flex items-center gap-1.5 px-2.5 py-1 rounded glass disabled:opacity-50"
+      >
+        <Pencil className="w-3 h-3" />
+        {busy ? 'Salvando…' : 'Apontar para outro arquivo (.eboot.bin / .pkg / .iso)'}
+      </button>
+      {msg && <p className="text-[11px] text-accent mt-1.5">{msg}</p>}
+    </div>
+  )
+}
+
+/**
  * Inline title editor. Click pencil → input appears → Enter/check saves,
  * Esc/x cancels. Persists via library.update; the zustand store stays in sync
  * because GameDetail re-reads from the games array on the next render.
@@ -340,7 +650,11 @@ function EditableTitle({ game }: { game: Game }): JSX.Element {
   if (!editing) {
     return (
       <h1 className="text-5xl font-display font-bold leading-tight group flex items-center gap-3">
-        <span>{game.title}</span>
+        {/* layoutId shared with GameCard's title — Framer animates the small
+            card title growing into this big hero heading. */}
+        <motion.span layoutId={`game-title-${game.id}`} transition={layoutSpring}>
+          {game.title}
+        </motion.span>
         <button
           onClick={() => setEditing(true)}
           className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-accent"
@@ -390,14 +704,7 @@ function EditableTitle({ game }: { game: Game }): JSX.Element {
 
 function PrimaryButton({ game, onClick }: { game: Game; onClick: () => void }): JSX.Element {
   if (game.status === 'missing-emulator') {
-    return (
-      <Link
-        to="/settings"
-        className="px-6 py-3 bg-rose-500 text-white rounded-lg font-semibold flex items-center gap-2 hover:bg-rose-400 transition-colors"
-      >
-        <Lock className="w-4 h-4" /> Configurar emulador
-      </Link>
-    )
+    return <MissingEmulatorButton game={game} />
   }
   if (game.status === 'missing-bios') {
     return (
@@ -410,6 +717,13 @@ function PrimaryButton({ game, onClick }: { game: Game; onClick: () => void }): 
     )
   }
   if (game.status === 'corrupted') {
+    // Compressed archives have a dedicated extract flow that turns the .7z
+    // into a playable .iso in place — much better than "tentar mesmo assim"
+    // which would launch the archive directly and fail.
+    const isArchive = /\.(zip|7z|rar)$/i.test(game.path)
+    if (isArchive) {
+      return <ExtractArchiveButton game={game} />
+    }
     return (
       <button
         onClick={onClick}
@@ -426,6 +740,102 @@ function PrimaryButton({ game, onClick }: { game: Game; onClick: () => void }): 
     >
       <Play className="w-5 h-5 fill-current" /> Jogar
     </button>
+  )
+}
+
+/**
+ * Smart button shown when a game has no emulator. Checks if we can auto-install
+ * one for this platform; if so, offers one-click install. Otherwise points the
+ * user to settings for manual config.
+ */
+function MissingEmulatorButton({ game }: { game: Game }): JSX.Element {
+  const reload = useLibraryStore((s) => s.reload)
+  const [suggestion, setSuggestion] = useState<{
+    emulatorId: string
+    emulatorName: string
+  } | null>(null)
+  const [installing, setInstalling] = useState(false)
+
+  useEffect(() => {
+    void window.api.emulator.suggestInstall(game.platform).then(setSuggestion)
+  }, [game.platform])
+
+  async function onInstall(): Promise<void> {
+    if (!suggestion) return
+    setInstalling(true)
+    await window.api.system.autoInstallEmulator(
+      suggestion.emulatorId as never,
+      suggestion.emulatorName
+    )
+    setInstalling(false)
+    await reload()
+  }
+
+  if (suggestion) {
+    return (
+      <button
+        onClick={onInstall}
+        disabled={installing}
+        className="px-6 py-3 bg-accent text-ink-950 rounded-lg font-semibold flex items-center gap-2 hover:bg-accent/90 disabled:opacity-60 transition-all shadow-[0_0_30px_rgba(94,234,212,0.45)]"
+      >
+        {installing ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Download className="w-4 h-4" />
+        )}
+        {installing ? `Instalando ${suggestion.emulatorName}…` : `Instalar ${suggestion.emulatorName}`}
+      </button>
+    )
+  }
+
+  return (
+    <Link
+      to="/settings"
+      className="px-6 py-3 bg-rose-500 text-white rounded-lg font-semibold flex items-center gap-2 hover:bg-rose-400 transition-colors"
+    >
+      <Lock className="w-4 h-4" /> Configurar emulador
+    </Link>
+  )
+}
+
+/**
+ * One-click extraction for compressed-archive games (.7z/.zip/.rar). Spawns
+ * 7zr.exe (downloaded on demand) and rewrites game.path to the extracted ISO.
+ * Big archives can take a minute — we show a spinner and disable the button.
+ */
+function ExtractArchiveButton({ game }: { game: Game }): JSX.Element {
+  const reload = useLibraryStore((s) => s.reload)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onExtract(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    const r = await window.api.library.extractArchive(game.id)
+    setBusy(false)
+    if ('error' in r) {
+      setError(r.error)
+    } else {
+      await reload()
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        onClick={onExtract}
+        disabled={busy}
+        className="px-6 py-3 bg-accent text-ink-950 rounded-lg font-semibold flex items-center gap-2 hover:bg-accent/90 disabled:opacity-60 transition-all shadow-[0_0_30px_rgba(94,234,212,0.45)]"
+      >
+        {busy ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Download className="w-4 h-4" />
+        )}
+        {busy ? 'Extraindo… (pode demorar)' : 'Extrair archive'}
+      </button>
+      {error && <div className="text-xs text-rose-300 max-w-sm">{error}</div>}
+    </div>
   )
 }
 

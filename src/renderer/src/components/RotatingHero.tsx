@@ -10,6 +10,7 @@ const ROTATE_INTERVAL = 9000
 
 interface Props {
   candidates: Game[]
+  onCurrentChange?: (game: Game) => void
 }
 
 /**
@@ -23,7 +24,7 @@ interface Props {
  * The hero is the visual centerpiece of Home, so we go heavy on motion
  * relative to the rest of the UI.
  */
-export default function RotatingHero({ candidates }: Props): JSX.Element {
+export default function RotatingHero({ candidates, onCurrentChange }: Props): JSX.Element {
   const scan = useLibraryStore((s) => s.scan)
   const progress = useLibraryStore((s) => s.progress)
   const [idx, setIdx] = useState(0)
@@ -41,6 +42,12 @@ export default function RotatingHero({ candidates }: Props): JSX.Element {
   useEffect(() => {
     if (idx >= candidates.length) setIdx(0)
   }, [candidates.length, idx])
+
+  const current = candidates[idx]
+
+  useEffect(() => {
+    if (current) onCurrentChange?.(current)
+  }, [current, onCurrentChange])
 
   if (candidates.length === 0) {
     return (
@@ -69,36 +76,14 @@ export default function RotatingHero({ candidates }: Props): JSX.Element {
     )
   }
 
-  const current = candidates[idx]
   const platform = PLATFORMS[current.platform]
 
   return (
     <section
-      className="px-12 pt-16 pb-12 relative overflow-hidden"
+      className="px-12 pt-16 pb-12 relative z-10 overflow-hidden"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* Big blurred backdrop using the focused game's cover */}
-      <AnimatePresence mode="wait">
-        {current.cover && (
-          <motion.div
-            key={`bg-${current.id}`}
-            initial={{ opacity: 0, scale: 1.1 }}
-            animate={{ opacity: 0.32, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 1.4, ease: 'easeOut' }}
-            className="absolute inset-0 -z-10"
-            style={{
-              backgroundImage: `url(${current.cover})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              filter: 'blur(40px) saturate(140%)',
-              transform: 'scale(1.2)'
-            }}
-          />
-        )}
-      </AnimatePresence>
-
       <div className="flex items-start justify-between gap-8">
         <div className="max-w-2xl flex-1 min-w-0">
           <AnimatePresence mode="wait">

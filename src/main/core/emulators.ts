@@ -4,6 +4,7 @@ import { EMULATORS, EMULATOR_LIST } from '@shared/emulators'
 import { log } from './logger'
 import { settingsStore } from './store'
 import type { DetectedEmulator, EmulatorId } from '@shared/types'
+import type { LaunchArgOptions } from '@shared/emulators'
 
 const MAX_DEPTH = 3
 
@@ -116,8 +117,12 @@ export function findExecutableForGame(
 }
 
 /** Build the absolute argv for launching a game via its emulator. */
-export function buildLaunchArgs(emulatorId: EmulatorId, gamePath: string): string[] {
+export function buildLaunchArgs(
+  emulatorId: EmulatorId,
+  gamePath: string,
+  options: LaunchArgOptions = { fullscreen: true }
+): string[] {
   const def = EMULATORS[emulatorId]
   if (!def?.buildArgs) return [gamePath]
-  return def.buildArgs(gamePath)
+  return def.buildArgs(gamePath, options)
 }

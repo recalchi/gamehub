@@ -173,6 +173,9 @@ Important security model:
 ### Build commands
 
 ```powershell
+# Generate brand icon pack (ico + png sizes)
+npm run icon:generate
+
 # Installer EXE (NSIS)
 npm run dist:win
 

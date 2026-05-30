@@ -160,6 +160,39 @@ npx electron . --smoke-backup    # exports config, mungeds library, restores, ve
 All exit 0 on success, 1 on failure, with full log lines in
 `%APPDATA%/gamehub/logs/<date>.log`.
 
+## Windows release and auto-update
+
+GameHub now uses `electron-builder` + `electron-updater` with GitHub Releases
+as the update source (not branch sync and never `git pull` on end-user machines).
+
+### Build installer locally
+
+```powershell
+npm run dist:win
+```
+
+Expected output in `release/`:
+- `GameHub-Setup-x64-<version>.exe`
+- `latest.yml`
+- `*.blockmap`
+
+### Publish a release
+
+```powershell
+npm run publish:win
+```
+
+This publishes versioned artifacts to `https://github.com/recalchi/gamehub/releases`.
+
+### Runtime updater flow
+
+1. App opens normally.
+2. In background, updater checks `stable` release metadata.
+3. If newer version exists, updater downloads package automatically.
+4. Downloaded package is verified by updater metadata (`latest.yml` + signature/hash chain).
+5. User can install/restart from Settings > About, or update applies on next quit.
+6. On network/update errors, app keeps running and logs the issue.
+
 ## Legal
 
 GameHub is a launcher. It does not distribute commercial ROMs, BIOS files or

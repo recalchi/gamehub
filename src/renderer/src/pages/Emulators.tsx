@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import RouteTransition from '../components/RouteTransition'
 import {
   Cpu,
+  Download,
   ExternalLink,
   FolderOpen,
   HelpCircle,
+  Loader2,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -14,6 +16,23 @@ import { useLibraryStore } from '../store/library'
 import { EMULATOR_LIST, EMULATORS } from '@shared/emulators'
 import type { BiosCheck, DetectedEmulator, EmulatorId } from '@shared/types'
 import { PLATFORMS } from '@shared/platforms'
+import PageHeader from '../components/PageHeader'
+
+/**
+ * Emulators we know how to download and install automatically.
+ * Keep in sync with the SPECS map in `core/autoInstall.ts`.
+ */
+const AUTO_INSTALLABLE: ReadonlySet<EmulatorId> = new Set([
+  'duckstation',
+  'ppsspp',
+  'desmume',
+  'mesen',
+  'mgba',
+  'shadps4',
+  'fpps4',
+  'xenia',
+  'dolphin'
+])
 
 /**
  * Per-emulator setup screen.
@@ -25,7 +44,10 @@ import { PLATFORMS } from '@shared/platforms'
 export default function Emulators(): JSX.Element {
   const emulators = useLibraryStore((s) => s.emulators)
   const scan = useLibraryStore((s) => s.scan)
+  const reload = useLibraryStore((s) => s.reload)
   const [busy, setBusy] = useState(false)
+  const [bulkInstalling, setBulkInstalling] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string } | null>(null)
 
   async function rescan(): Promise<void> {
     setBusy(true)
@@ -33,34 +55,86 @@ export default function Emulators(): JSX.Element {
     setBusy(false)
   }
 
+  // List of emulators we could install in bulk (auto-installable AND not yet detected)
+  const installable = EMULATOR_LIST.filter(
+    (def) => AUTO_INSTALLABLE.has(def.id) && !emulators.some((e) => e.id === def.id)
+  )
+
+  async function installAll(): Promise<void> {
+    if (installable.length === 0) return
+    setBulkInstalling(true)
+    setBulkProgress({ done: 0, total: installable.length, current: installable[0].name })
+    for (let i = 0; i < installable.length; i++) {
+      const def = installable[i]
+      setBulkProgress({ done: i, total: installable.length, current: def.name })
+      await window.api.system.autoInstallEmulator(def.id, def.name)
+    }
+    setBulkProgress({ done: installable.length, total: installable.length, current: 'concluído' })
+    await reload()
+    setTimeout(() => {
+      setBulkInstalling(false)
+      setBulkProgress(null)
+    }, 1800)
+  }
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="px-12 py-12 max-w-5xl"
-    >
-      <header className="flex items-start justify-between mb-2">
-        <div>
-          <h1 className="text-3xl font-display font-bold flex items-center gap-3">
-            <Cpu className="w-8 h-8 text-accent" /> Emuladores
-          </h1>
-          <p className="text-slate-400 mt-1">
-            Status de cada emulador e da BIOS que ele precisa para funcionar.
-          </p>
+    <RouteTransition className="px-12 py-12 max-w-5xl">
+      <PageHeader
+        title="Emuladores"
+        icon={Cpu}
+        subtitle="Status de cada emulador e da BIOS que ele precisa para funcionar."
+        actions={
+          <>
+            {installable.length > 0 && (
+              <button
+                onClick={installAll}
+                disabled={bulkInstalling}
+                title={`Instala em sequência: ${installable.map((d) => d.name).join(', ')}`}
+                className="px-3 py-2 bg-accent text-ink-950 text-xs rounded-md flex items-center gap-1.5 font-semibold hover:bg-accent/90 disabled:opacity-60 shadow-glow"
+              >
+                {bulkInstalling ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Download className="w-3 h-3" />
+                )}
+                Instalar {installable.length} faltantes em lote
+              </button>
+            )}
+            <button
+              onClick={rescan}
+              disabled={busy}
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 text-xs rounded-md flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} /> Re-checar tudo
+            </button>
+          </>
+        }
+      />
+
+      {bulkProgress && (
+        <div className="glass rounded-lg p-3 mb-4 border border-accent/40 bg-accent/5">
+          <div className="text-xs text-slate-200 flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+            <span className="font-semibold">{bulkProgress.current}</span>
+            <span className="text-slate-400">
+              ({bulkProgress.done + 1}/{bulkProgress.total})
+            </span>
+          </div>
+          <div className="mt-2 h-1 bg-ink-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-accent transition-all"
+              style={{
+                width: `${(bulkProgress.done / Math.max(bulkProgress.total, 1)) * 100}%`
+              }}
+            />
+          </div>
         </div>
-        <button
-          onClick={rescan}
-          disabled={busy}
-          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-xs rounded-md flex items-center gap-1.5 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} /> Re-checar tudo
-        </button>
-      </header>
+      )}
 
       <p className="text-[11px] text-slate-500 mb-8">
         GameHub apenas <strong>detecta</strong> BIOS e firmware que você já obteve legalmente —
-        nunca baixa arquivos proprietários.
+        nunca baixa arquivos proprietários. <strong>Emuladores</strong> open-source podem ser
+        baixados automaticamente das releases oficiais.
       </p>
 
       <ul className="space-y-3">
@@ -70,7 +144,7 @@ export default function Emulators(): JSX.Element {
           return <EmulatorCard key={def.id} defId={def.id} detected={detected} />
         })}
       </ul>
-    </motion.div>
+    </RouteTransition>
   )
 }
 
@@ -84,6 +158,7 @@ function EmulatorCard({
   const def = EMULATORS[defId]
   const [bios, setBios] = useState<BiosCheck | null>(null)
   const [checking, setChecking] = useState(false)
+  const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     if (!detected) {
@@ -109,6 +184,14 @@ function EmulatorCard({
     await window.api.emulator.setOverride(defId, exe)
     // Force re-detect to refresh detected list + library statuses
     await window.api.emulator.detect()
+    location.reload()
+  }
+
+  async function autoInstall(): Promise<void> {
+    setInstalling(true)
+    await window.api.system.autoInstallEmulator(defId, def.name)
+    setInstalling(false)
+    // Force a fresh read so the card re-renders as "detected"
     location.reload()
   }
 
@@ -148,12 +231,28 @@ function EmulatorCard({
             {detected.source}
           </span>
         ) : (
-          <button
-            onClick={pickExe}
-            className="text-[11px] px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-md flex items-center gap-1"
-          >
-            <Wrench className="w-3 h-3" /> Localizar…
-          </button>
+          <div className="flex flex-col gap-1 items-end">
+            {AUTO_INSTALLABLE.has(defId) && (
+              <button
+                onClick={autoInstall}
+                disabled={installing}
+                className="text-[11px] px-2.5 py-1 bg-accent text-ink-950 font-semibold rounded-md flex items-center gap-1 disabled:opacity-60"
+              >
+                {installing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Download className="w-3 h-3" />
+                )}
+                {installing ? 'Instalando…' : 'Instalar'}
+              </button>
+            )}
+            <button
+              onClick={pickExe}
+              className="text-[11px] px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-md flex items-center gap-1"
+            >
+              <Wrench className="w-3 h-3" /> Localizar…
+            </button>
+          </div>
         )}
       </header>
 

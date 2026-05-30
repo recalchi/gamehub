@@ -16,8 +16,11 @@ interface LibraryState {
   lastScan?: ScanResult
   init: () => Promise<void>
   scan: (opts?: { fresh?: boolean }) => Promise<ScanResult>
+  /** Re-read library.json without running a full filesystem scan — cheap. */
+  reload: () => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   launch: (id: string) => Promise<{ ok: boolean; error?: string }>
+  terminate: (id: string) => Promise<{ ok: boolean; error?: string; note?: string }>
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>
 }
 
@@ -46,12 +49,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         )
       })
     })
+    window.api.launch.onEnded(() => {
+      void window.api.library.list().then((latest) =>
+        set({ games: latest.games, emulators: latest.emulators })
+      )
+    })
     set({
       games: data.games,
       emulators: data.emulators,
       settings,
       initialized: true
     })
+  },
+
+  async reload() {
+    const data = await window.api.library.list()
+    set({ games: data.games, emulators: data.emulators })
   },
 
   async scan(opts) {
@@ -79,6 +92,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   async launch(id) {
     const result = await window.api.launch.game(id)
     return { ok: result.ok, error: result.error }
+  },
+
+  async terminate(id) {
+    const result = await window.api.launch.terminate(id)
+    return { ok: result.ok, error: result.error, note: result.note }
   },
 
   async saveSettings(patch) {

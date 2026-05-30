@@ -7,6 +7,17 @@ const logFile = join(PATHS.logs, `${new Date().toISOString().slice(0, 10)}.log`)
 const buffer: LogEntry[] = []
 const MAX_BUFFER = 500
 
+// Live subscribers — the splash subscribes here so users with the "show real
+// boot logs" toggle on can see actual main-process events stream in instead
+// of the canned BOOT_LINES.
+type LogListener = (entry: LogEntry) => void
+const listeners = new Set<LogListener>()
+
+export function subscribeLogs(listener: LogListener): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 function write(entry: LogEntry): void {
   buffer.push(entry)
   if (buffer.length > MAX_BUFFER) buffer.shift()
@@ -19,6 +30,15 @@ function write(entry: LogEntry): void {
   // Mirror to stdout so electron-vite dev console shows them
   // eslint-disable-next-line no-console
   console.log(line.trimEnd())
+  // Fan-out to live subscribers — try/catch each so one bad listener doesn't
+  // poison the rest (or the file write that already succeeded).
+  for (const listener of listeners) {
+    try {
+      listener(entry)
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function safeStringify(data: unknown): string {

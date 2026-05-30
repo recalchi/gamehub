@@ -1,7 +1,15 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { PATHS } from './paths'
 import { log } from './logger'
-import type { AppSettings, DetectedEmulator, Game } from '@shared/types'
+import type {
+  AppSettings,
+  DetectedEmulator,
+  Game,
+  MediaItem,
+  MediaLibraryFile,
+  MediaWatchRecord,
+  MediaWatchedFile
+} from '@shared/types'
 
 /**
  * MVP persistence: a single JSON file per concern.
@@ -16,9 +24,83 @@ const DEFAULT_SETTINGS: AppSettings = {
   emulatorRoots: ['D:\\Jogos\\Emuladores'],
   emulatorOverrides: {},
   platformEmulators: {},
+  emulatorSelection: 'auto',
   fullscreenOnStart: false,
   skipSplash: false,
   locale: 'pt-BR',
+  appearance: {
+    dynamicGameBackgrounds: true,
+    gameBackgroundPreset: 'vibrant',
+    sidebarPinned: false
+  },
+  performance: {
+    enabled: true,
+    showOnGameDetail: true,
+    sampleIntervalMs: 2000,
+    warnCpuPercent: 85,
+    warnMemoryMb: 4096,
+    historySeconds: 180
+  },
+  discord: {
+    enabled: true,
+    clientId: '',
+    showPlatform: true
+  },
+  steamGridDb: {
+    enabled: false,
+    apiKey: ''
+  },
+  launch: {
+    preset: 'monitor',
+    fullscreenGames: true,
+    minimizeGameHubOnLaunch: false,
+    restoreGameHubAfterExit: true,
+    gameHubDisplay: 'current',
+    gameDisplay: 'secondary',
+    moveGameWindowAfterLaunch: true
+  },
+  sounds: {
+    enabled: true,
+    volume: 0.42,
+    navigation: true,
+    confirm: true,
+    back: true,
+    toggle: true,
+    launch: true
+  },
+  mods: {
+    minecraftLoader: 'fabric',
+    minecraftVersion: 'auto',
+    installTarget: 'gamehub',
+    customInstallRoot: '',
+    openFolderAfterDownload: false
+  },
+  epic: {
+    enabled: true,
+    clientId: '',
+    clientSecret: ''
+  },
+  media: {
+    mediaRoots: ['E:\\Filmes e Séries'],
+    downloadRoot: 'E:\\Filmes e Séries\\Livres',
+    openInExternalPlayer: true,
+    playerMode: 'internal',
+    subtitlesEnabled: true,
+    preferredSubtitleLanguage: 'pt-BR',
+    subtitleFontScale: 1,
+    subtitleBackground: true,
+    streamingProviders: [
+      {
+        id: 'prime-video',
+        name: 'Prime Video',
+        enabled: true,
+        baseUrl: 'https://www.primevideo.com/',
+        searchUrl: 'https://www.primevideo.com/search/ref=atv_nb_sr?phrase={query}',
+        activationUrl: 'https://www.primevideo.com/mytv',
+        openMode: 'browser'
+      }
+    ]
+  },
   input: {
     preferredGamepadId: '',
     deadzone: 0.5,
@@ -36,7 +118,7 @@ interface LibraryFile {
 function readJson<T>(path: string, fallback: T): T {
   if (!existsSync(path)) return fallback
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T
+    return JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) as T
   } catch (err) {
     log.error('store', `failed to read ${path}, using fallback`, { err: String(err) })
     return fallback
@@ -55,6 +137,20 @@ export const settingsStore = {
     return {
       ...DEFAULT_SETTINGS,
       ...loaded,
+      appearance: { ...DEFAULT_SETTINGS.appearance, ...(loaded.appearance ?? {}) },
+      performance: { ...DEFAULT_SETTINGS.performance, ...(loaded.performance ?? {}) },
+      discord: { ...DEFAULT_SETTINGS.discord, ...(loaded.discord ?? {}) },
+      steamGridDb: { ...DEFAULT_SETTINGS.steamGridDb!, ...(loaded.steamGridDb ?? {}) },
+      launch: { ...DEFAULT_SETTINGS.launch, ...(loaded.launch ?? {}) },
+      sounds: { ...DEFAULT_SETTINGS.sounds, ...(loaded.sounds ?? {}) },
+      mods: { ...DEFAULT_SETTINGS.mods, ...(loaded.mods ?? {}) },
+      epic: { ...DEFAULT_SETTINGS.epic, ...(loaded.epic ?? {}) },
+      media: {
+        ...DEFAULT_SETTINGS.media,
+        ...(loaded.media ?? {}),
+        streamingProviders:
+          loaded.media?.streamingProviders ?? DEFAULT_SETTINGS.media.streamingProviders
+      },
       input: { ...DEFAULT_SETTINGS.input, ...(loaded.input ?? {}) }
     }
   },
@@ -63,13 +159,44 @@ export const settingsStore = {
   }
 }
 
+/**
+ * Migrate legacy `file:///` cover URLs to `gh-asset://`.
+ *
+ * Older library.json files (pre-protocol) store renderer-unsafe file:// URLs.
+ * We rewrite them lazily on load by extracting the basename and mapping to the
+ * appropriate gh-asset kind. Persists the rewrite so we only do this once.
+ */
+function migrateAssetUrl(url: string | undefined, kind: 'cover' | 'banner'): string | undefined {
+  if (!url) return url
+  if (url.startsWith('gh-asset://')) return url
+  if (!url.startsWith('file:')) return url
+  const filename = url.split(/[/\\]/).pop()
+  if (!filename) return undefined
+  return `gh-asset://${kind}/${encodeURIComponent(filename)}`
+}
+
 export const libraryStore = {
   load(): LibraryFile {
-    return readJson<LibraryFile>(PATHS.libraryFile, {
+    const raw = readJson<LibraryFile>(PATHS.libraryFile, {
       games: [],
       emulators: [],
       updatedAt: new Date().toISOString()
     })
+    let dirty = false
+    const games = raw.games.map((g) => {
+      const cover = migrateAssetUrl(g.cover, 'cover')
+      const banner = migrateAssetUrl(g.banner, 'banner')
+      if (cover !== g.cover || banner !== g.banner) {
+        dirty = true
+        return { ...g, cover, banner }
+      }
+      return g
+    })
+    if (dirty) {
+      log.info('store', 'migrated legacy file:// cover URLs to gh-asset://')
+      writeJson(PATHS.libraryFile, { ...raw, games, updatedAt: new Date().toISOString() })
+    }
+    return { ...raw, games }
   },
   save(games: Game[], emulators: DetectedEmulator[]): void {
     writeJson(PATHS.libraryFile, {
@@ -103,6 +230,98 @@ export const libraryStore = {
     data.games = data.games.filter((g) => g.id !== id)
     if (data.games.length === before) return false
     this.save(data.games, data.emulators)
+    return true
+  }
+}
+
+export const mediaStore = {
+  load(): MediaLibraryFile {
+    const raw = readJson<MediaLibraryFile>(PATHS.mediaLibraryFile, {
+      items: [],
+      updatedAt: new Date().toISOString()
+    })
+    let dirty = false
+    const items = raw.items.map((item) => {
+      const cover = migrateAssetUrl(item.cover, 'cover')
+      const banner = migrateAssetUrl(item.banner, 'banner')
+      if (cover !== item.cover || banner !== item.banner) {
+        dirty = true
+        return { ...item, cover, banner }
+      }
+      return item
+    })
+    if (dirty) {
+      writeJson(PATHS.mediaLibraryFile, { ...raw, items, updatedAt: new Date().toISOString() })
+    }
+    return { ...raw, items }
+  },
+  save(items: MediaItem[]): void {
+    writeJson(PATHS.mediaLibraryFile, {
+      items,
+      updatedAt: new Date().toISOString()
+    } satisfies MediaLibraryFile)
+  },
+  patchItem(id: string, patch: Partial<MediaItem>): MediaItem | null {
+    const data = this.load()
+    const idx = data.items.findIndex((item) => item.id === id)
+    if (idx === -1) return null
+    const updated = { ...data.items[idx], ...patch }
+    data.items[idx] = updated
+    this.save(data.items)
+    return updated
+  },
+  addItem(item: MediaItem): MediaItem {
+    const data = this.load()
+    const idx = data.items.findIndex((existing) => existing.id === item.id)
+    if (idx === -1) data.items.push(item)
+    else data.items[idx] = item
+    this.save(data.items)
+    return item
+  }
+}
+
+export const watchedMediaStore = {
+  load(): MediaWatchedFile {
+    const raw = readJson<MediaWatchedFile>(PATHS.mediaWatchedFile, {
+      records: [],
+      updatedAt: new Date().toISOString()
+    })
+    let dirty = false
+    const records = raw.records.map((record) => {
+      const cover = migrateAssetUrl(record.cover, 'cover')
+      const banner = migrateAssetUrl(record.banner, 'banner')
+      if (cover !== record.cover || banner !== record.banner) {
+        dirty = true
+        return { ...record, cover, banner }
+      }
+      return record
+    })
+    if (dirty) {
+      writeJson(PATHS.mediaWatchedFile, { ...raw, records, updatedAt: new Date().toISOString() })
+    }
+    return { ...raw, records }
+  },
+  save(records: MediaWatchRecord[]): void {
+    writeJson(PATHS.mediaWatchedFile, {
+      records,
+      updatedAt: new Date().toISOString()
+    } satisfies MediaWatchedFile)
+  },
+  upsert(record: MediaWatchRecord): MediaWatchRecord {
+    const data = this.load()
+    const idx = data.records.findIndex((existing) => existing.id === record.id)
+    if (idx === -1) data.records.unshift(record)
+    else data.records[idx] = record
+    data.records.sort((a, b) => b.lastWatchedAt.localeCompare(a.lastWatchedAt))
+    this.save(data.records)
+    return record
+  },
+  removeByMediaId(mediaId: string): boolean {
+    const data = this.load()
+    const before = data.records.length
+    const next = data.records.filter((record) => record.mediaId !== mediaId)
+    if (next.length === before) return false
+    this.save(next)
     return true
   }
 }

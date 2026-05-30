@@ -16,7 +16,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     shortName: 'NES',
     manufacturer: 'Nintendo',
     extensions: ['nes', 'fds', 'unf', 'unif'],
-    emulators: ['retroarch'],
+    emulators: ['mesen', 'retroarch'],
     color: '#b91c1c',
     releaseYear: 1983
   },
@@ -26,7 +26,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     shortName: 'SNES',
     manufacturer: 'Nintendo',
     extensions: ['smc', 'sfc', 'fig', 'swc'],
-    emulators: ['retroarch'],
+    emulators: ['mesen', 'retroarch'],
     color: '#7c3aed',
     releaseYear: 1990
   },
@@ -66,7 +66,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     shortName: 'GB',
     manufacturer: 'Nintendo',
     extensions: ['gb'],
-    emulators: ['mgba', 'retroarch'],
+    emulators: ['mesen', 'mgba', 'retroarch'],
     color: '#a3a3a3',
     releaseYear: 1989
   },
@@ -76,7 +76,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     shortName: 'GBC',
     manufacturer: 'Nintendo',
     extensions: ['gbc'],
-    emulators: ['mgba', 'retroarch'],
+    emulators: ['mesen', 'mgba', 'retroarch'],
     color: '#f97316',
     releaseYear: 1998
   },
@@ -150,6 +150,18 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     color: '#1e3a8a',
     releaseYear: 2006
   },
+  ps4: {
+    id: 'ps4',
+    name: 'PlayStation 4',
+    shortName: 'PS4',
+    manufacturer: 'Sony',
+    extensions: ['pkg'],
+    // fpPS4 first — handles UE4 games that crash on shadPS4 (Elden Ring etc).
+    // shadPS4 fallback for indies/smaller games where fpPS4 may regress.
+    emulators: ['fpps4', 'shadps4'],
+    color: '#0c2a6b',
+    releaseYear: 2013
+  },
   psp: {
     id: 'psp',
     name: 'PlayStation Portable',
@@ -176,7 +188,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     shortName: 'X360',
     manufacturer: 'Microsoft',
     extensions: ['iso', 'xex'],
-    emulators: ['unknown'],
+    emulators: ['xenia'],
     color: '#65a30d',
     releaseYear: 2005
   },
@@ -185,7 +197,7 @@ export const PLATFORMS: Record<PlatformId, PlatformInfo> = {
     name: 'PC',
     shortName: 'PC',
     manufacturer: 'PC',
-    extensions: ['exe', 'bat', 'lnk', 'url', 'jar'],
+    extensions: ['exe', 'bat', 'cmd', 'lnk', 'url', 'jar'],
     emulators: ['native'],
     color: '#f59e0b',
     releaseYear: 1981
@@ -207,7 +219,7 @@ export const PLATFORM_LIST: PlatformInfo[] = Object.values(PLATFORMS)
   .sort((a, b) => a.releaseYear - b.releaseYear)
 
 /** Extensions that are ambiguous and require path / sibling-file heuristics */
-export const AMBIGUOUS_EXTENSIONS = new Set(['iso', 'bin', 'cue', 'chd', 'pbp', 'cso', 'gz'])
+export const AMBIGUOUS_EXTENSIONS = new Set(['iso', 'bin', 'cue', 'chd', 'pbp', 'cso', 'gz', 'pkg'])
 
 /** Archive extensions — we surface them but don't auto-extract */
 export const ARCHIVE_EXTENSIONS = new Set(['zip', '7z', 'rar', 'tar', 'gz'])
@@ -220,6 +232,7 @@ export const PATH_HINTS: Array<{ pattern: RegExp; platform: PlatformId }> = [
   { pattern: /\b(ps1|psx|playstation 1|playstation\b(?!\s*[23]))/i, platform: 'ps1' },
   { pattern: /\b(ps2|playstation 2)\b/i, platform: 'ps2' },
   { pattern: /\b(ps3|playstation 3)\b/i, platform: 'ps3' },
+  { pattern: /\b(ps4|playstation 4)\b/i, platform: 'ps4' },
   { pattern: /\b(psp|playstation portable)\b/i, platform: 'psp' },
   { pattern: /\b(gamecube|ngc|gcn)\b/i, platform: 'gamecube' },
   { pattern: /\b(wii)\b/i, platform: 'wii' },

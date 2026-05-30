@@ -13,6 +13,7 @@ const KEY_SECTIONS = [
   {
     title: 'Navegação',
     rows: [
+      ['Ctrl/⌘ + K', 'Abrir paleta de comandos'],
       ['Arrows / WASD', 'Mover foco'],
       ['Enter', 'Confirmar / Jogar'],
       ['Esc', 'Voltar / Sair'],

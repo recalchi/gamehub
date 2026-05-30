@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+import RouteTransition from '../components/RouteTransition'
 import { Link } from 'react-router-dom'
 import { BarChart3, Clock, Heart, Image, Play, Trophy } from 'lucide-react'
 import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 import type { Game, GameStatus, PlatformId } from '@shared/types'
+import PageHeader from '../components/PageHeader'
 
 const STATUS_COLORS: Record<GameStatus, string> = {
   ready: '#34d399',
@@ -35,20 +36,21 @@ export default function Stats(): JSX.Element {
   const stats = useMemo(() => computeStats(games), [games])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="px-12 py-12 max-w-5xl"
-    >
-      <header className="mb-8">
-        <h1 className="text-3xl font-display font-bold flex items-center gap-3">
-          <BarChart3 className="w-8 h-8 text-accent" /> Estatísticas
-        </h1>
-        <p className="text-slate-400 mt-1">
-          Sua biblioteca em números. Atualiza sozinha conforme você joga.
-        </p>
-      </header>
+    <RouteTransition className="px-12 py-12 max-w-5xl">
+      <PageHeader
+        title="Estatísticas"
+        icon={BarChart3}
+        subtitle="Sua biblioteca em números. Inclui o tempo local importado da Steam quando disponível."
+        rightSlot={
+          stats.steamSeconds > 0 ? (
+            <p className="text-[11px] text-cyan-300/80">
+              Steam: {formatDuration(stats.steamSeconds)} somados de {stats.steamPlayedCount} jogo
+              {stats.steamPlayedCount === 1 ? '' : 's'} importado
+              {stats.steamPlayedCount === 1 ? '' : 's'}.
+            </p>
+          ) : undefined
+        }
+      />
 
       {/* Top KPI tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -169,6 +171,9 @@ export default function Stats(): JSX.Element {
                         <div className="font-semibold truncate">{g.title}</div>
                         <div className="text-xs text-slate-500">
                           {PLATFORMS[g.platform]?.name}
+                          {isSteamGame(g) && (
+                            <span className="ml-2 text-cyan-300/80">Steam</span>
+                          )}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
@@ -213,7 +218,7 @@ export default function Stats(): JSX.Element {
           </section>
         </div>
       )}
-    </motion.div>
+    </RouteTransition>
   )
 }
 
@@ -295,6 +300,8 @@ interface StatsBundle {
   ready: number
   favorites: number
   totalSeconds: number
+  steamSeconds: number
+  steamPlayedCount: number
   withCovers: number
   coverHitRate: number
   byPlatform: Array<{ id: PlatformId; name: string; color: string; count: number }>
@@ -308,6 +315,9 @@ function computeStats(games: Game[]): StatsBundle {
   const ready = games.filter((g) => g.status === 'ready').length
   const favorites = games.filter((g) => g.favorite).length
   const totalSeconds = games.reduce((sum, g) => sum + (g.playTime ?? 0), 0)
+  const steamGames = games.filter(isSteamGame)
+  const steamSeconds = steamGames.reduce((sum, g) => sum + (g.playTime ?? 0), 0)
+  const steamPlayedCount = steamGames.filter((g) => (g.playTime ?? 0) > 0).length
   const withCovers = games.filter((g) => g.cover).length
 
   const platformCounts = new Map<PlatformId, number>()
@@ -342,6 +352,8 @@ function computeStats(games: Game[]): StatsBundle {
     ready,
     favorites,
     totalSeconds,
+    steamSeconds,
+    steamPlayedCount,
     withCovers,
     coverHitRate: total === 0 ? 0 : withCovers / total,
     byPlatform,
@@ -349,6 +361,10 @@ function computeStats(games: Game[]): StatsBundle {
     byStatus,
     topPlayed
   }
+}
+
+function isSteamGame(game: Game): boolean {
+  return game.path.startsWith('steam://') || game.flags?.includes('steam')
 }
 
 function formatDuration(seconds: number): string {

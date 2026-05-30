@@ -15,16 +15,13 @@ function New-RoundedRectPath {
     [double]$H,
     [double]$R
   )
-
   $path = New-Object System.Drawing.Drawing2D.GraphicsPath
   $d = $R * 2
-
   $path.AddArc($X, $Y, $d, $d, 180, 90)
   $path.AddArc($X + $W - $d, $Y, $d, $d, 270, 90)
   $path.AddArc($X + $W - $d, $Y + $H - $d, $d, $d, 0, 90)
   $path.AddArc($X, $Y + $H - $d, $d, $d, 90, 90)
   $path.CloseFigure()
-
   return $path
 }
 
@@ -51,8 +48,8 @@ function Save-IcoFromPngs {
   $fs = [System.IO.File]::Open($IcoPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
   try {
     $bw = New-Object System.IO.BinaryWriter($fs)
-    $bw.Write([UInt16]0) # reserved
-    $bw.Write([UInt16]1) # icon type
+    $bw.Write([UInt16]0)
+    $bw.Write([UInt16]1)
     $bw.Write([UInt16]$count)
 
     for ($i = 0; $i -lt $count; $i++) {
@@ -67,32 +64,27 @@ function Save-IcoFromPngs {
       $blob = $pngBlobs[$i]
       $widthByte = if ($w -ge 256) { 0 } else { [byte]$w }
       $heightByte = if ($h -ge 256) { 0 } else { [byte]$h }
-
       $bw.Write([byte]$widthByte)
       $bw.Write([byte]$heightByte)
-      $bw.Write([byte]0)       # color count
-      $bw.Write([byte]0)       # reserved
-      $bw.Write([UInt16]1)     # planes
-      $bw.Write([UInt16]32)    # bit depth
+      $bw.Write([byte]0)
+      $bw.Write([byte]0)
+      $bw.Write([UInt16]1)
+      $bw.Write([UInt16]32)
       $bw.Write([UInt32]$blob.Length)
       $bw.Write([UInt32]$offset)
-
       $offset += $blob.Length
     }
 
-    foreach ($blob in $pngBlobs) {
-      $bw.Write($blob)
-    }
+    foreach ($blob in $pngBlobs) { $bw.Write($blob) }
     $bw.Flush()
   } finally {
     $fs.Dispose()
   }
 }
 
-$out = Resolve-Path -LiteralPath "." | ForEach-Object { $_.Path }
-$buildDir = Join-Path $out $OutDir
+$root = Resolve-Path -LiteralPath "." | ForEach-Object { $_.Path }
+$buildDir = Join-Path $root $OutDir
 $iconDir = Join-Path $buildDir "icons"
-
 if (-not (Test-Path -LiteralPath $iconDir)) {
   New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
 }
@@ -109,87 +101,66 @@ try {
   $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
   $g.Clear([System.Drawing.Color]::Transparent)
 
-  # Background card
-  $cardPath = New-RoundedRectPath -X 70 -Y 70 -W 884 -H 884 -R 210
+  # Premium dark base
+  $card = New-RoundedRectPath -X 72 -Y 72 -W 880 -H 880 -R 196
   try {
-    $bg = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-      (New-Object System.Drawing.PointF(70, 70)),
-      (New-Object System.Drawing.PointF(954, 954)),
-      ([System.Drawing.Color]::FromArgb(255, 10, 16, 30)),
-      ([System.Drawing.Color]::FromArgb(255, 18, 35, 60))
+    $base = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+      (New-Object System.Drawing.PointF(72, 72)),
+      (New-Object System.Drawing.PointF(952, 952)),
+      ([System.Drawing.Color]::FromArgb(255, 7, 10, 18)),
+      ([System.Drawing.Color]::FromArgb(255, 12, 20, 33))
     )
-    try {
-      $g.FillPath($bg, $cardPath)
-    } finally {
-      $bg.Dispose()
-    }
-  } finally {
-    $cardPath.Dispose()
-  }
+    try { $g.FillPath($base, $card) } finally { $base.Dispose() }
+  } finally { $card.Dispose() }
 
-  # Soft inner glow
-  $glowRect = New-Object System.Drawing.RectangleF(130, 120, 760, 760)
-  $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-  try {
-    $glowPath.AddEllipse($glowRect)
-    $pg = New-Object System.Drawing.Drawing2D.PathGradientBrush($glowPath)
-    try {
-      $pg.CenterColor = [System.Drawing.Color]::FromArgb(120, 44, 201, 255)
-      $pg.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 44, 201, 255))
-      $g.FillEllipse($pg, $glowRect)
-    } finally {
-      $pg.Dispose()
-    }
-  } finally {
-    $glowPath.Dispose()
-  }
+  # Subtle border
+  $frame = New-RoundedRectPath -X 78 -Y 78 -W 868 -H 868 -R 188
+  $framePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(64, 255, 255, 255), 2)
+  try { $g.DrawPath($framePen, $frame) } finally { $framePen.Dispose(); $frame.Dispose() }
 
-  # Main "G" neon ring
-  $ringRect = New-Object System.Drawing.RectangleF(210, 210, 604, 604)
-  $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 0, 230, 255), 88)
+  # Symbol: monoline "G" with integrated "H" bar (minimal + futuristic)
+  $ringRect = New-Object System.Drawing.RectangleF(208, 208, 608, 608)
+  $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 44, 232, 255), 78)
   try {
     $ringPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
     $ringPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $g.DrawArc($ringPen, $ringRect, 25, 300)
-  } finally {
-    $ringPen.Dispose()
-  }
+    $g.DrawArc($ringPen, $ringRect, 34, 292)
+  } finally { $ringPen.Dispose() }
 
-  # Cross-bar to complete "G"
-  $barBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-    (New-Object System.Drawing.PointF(530, 500)),
-    (New-Object System.Drawing.PointF(800, 600)),
-    ([System.Drawing.Color]::FromArgb(255, 0, 240, 255)),
-    ([System.Drawing.Color]::FromArgb(255, 148, 92, 255))
+  # Inner cut to make the mark breathe on small sizes
+  $cutBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 9, 14, 24))
+  try {
+    $cut = New-RoundedRectPath -X 490 -Y 470 -W 280 -H 136 -R 68
+    try { $g.FillPath($cutBrush, $cut) } finally { $cut.Dispose() }
+  } finally { $cutBrush.Dispose() }
+
+  # H-bar accent
+  $accent = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    (New-Object System.Drawing.PointF(504, 480)),
+    (New-Object System.Drawing.PointF(760, 616)),
+    ([System.Drawing.Color]::FromArgb(255, 50, 244, 255)),
+    ([System.Drawing.Color]::FromArgb(255, 158, 108, 255))
   )
   try {
-    $barPath = New-RoundedRectPath -X 510 -Y 498 -W 250 -H 120 -R 56
+    $bar = New-RoundedRectPath -X 504 -Y 480 -W 252 -H 126 -R 61
+    try { $g.FillPath($accent, $bar) } finally { $bar.Dispose() }
+  } finally { $accent.Dispose() }
+
+  # tiny signal point
+  $dot = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 90, 190))
+  try { $g.FillEllipse($dot, 684, 430, 68, 68) } finally { $dot.Dispose() }
+
+  # Ambient glow
+  $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+  try {
+    $glowPath.AddEllipse((New-Object System.Drawing.RectangleF(176, 176, 672, 672)))
+    $pg = New-Object System.Drawing.Drawing2D.PathGradientBrush($glowPath)
     try {
-      $g.FillPath($barBrush, $barPath)
-    } finally {
-      $barPath.Dispose()
-    }
-  } finally {
-    $barBrush.Dispose()
-  }
-
-  # Minimal "button" accent
-  $btnBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 95, 198))
-  try {
-    $g.FillEllipse($btnBrush, 688, 430, 76, 76)
-  } finally {
-    $btnBrush.Dispose()
-  }
-
-  # Gloss edge
-  $edgePath = New-RoundedRectPath -X 76 -Y 76 -W 872 -H 872 -R 205
-  $edgePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(90, 255, 255, 255), 2)
-  try {
-    $g.DrawPath($edgePen, $edgePath)
-  } finally {
-    $edgePen.Dispose()
-    $edgePath.Dispose()
-  }
+      $pg.CenterColor = [System.Drawing.Color]::FromArgb(86, 42, 220, 255)
+      $pg.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 42, 220, 255))
+      $g.FillEllipse($pg, 176, 176, 672, 672)
+    } finally { $pg.Dispose() }
+  } finally { $glowPath.Dispose() }
 
   $bmp.Save($masterPath, [System.Drawing.Imaging.ImageFormat]::Png)
 } finally {
@@ -219,7 +190,6 @@ foreach ($size in $sizes) {
   $pngPath = Join-Path $iconDir ("icon-{0}.png" -f $size)
   $dst.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
   $dst.Dispose()
-
   if ($size -le 256) { $pngsForIco += $pngPath }
 }
 

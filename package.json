@@ -11,10 +11,12 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "build:win": "electron-vite build && electron-builder --win --dir",
-    "dist:win": "electron-vite build && electron-builder --win nsis",
+    "build:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win --dir",
+    "dist:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win nsis --x64",
+    "dist:win:portable": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win dir --x64 && node scripts/package-portable.mjs",
+    "dist:win:full": "npm run dist:win && npm run dist:win:portable && npm run manifest:win",
     "manifest:win": "node scripts/generate-update-manifest.mjs",
-    "publish:win": "electron-vite build && electron-builder --win nsis --publish always",
+    "publish:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win nsis --x64 --publish always",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
@@ -47,13 +49,19 @@
         }
       ],
       "artifactName": "GameHub-Setup-${arch}-${version}.${ext}",
-      "verifyUpdateCodeSignature": true
+      "verifyUpdateCodeSignature": true,
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "runAfterFinish": true
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "pt_BR",
+        "en_US"
+      ]
     }
   },
   "dependencies": {

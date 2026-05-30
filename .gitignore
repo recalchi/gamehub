@@ -3,6 +3,7 @@ out
 dist
 release
 .vite
+.cache
 *.log
 *.tsbuildinfo
 .DS_Store

@@ -15,6 +15,7 @@
     "dist:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win nsis --x64",
     "dist:win:portable": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win dir --x64 && node scripts/package-portable.mjs",
     "dist:win:full": "npm run dist:win && npm run dist:win:portable && npm run manifest:win",
+    "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\generate-app-icon.ps1",
     "manifest:win": "node scripts/generate-update-manifest.mjs",
     "publish:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win nsis --x64 --publish always",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -40,6 +41,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

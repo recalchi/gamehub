@@ -118,47 +118,63 @@ try {
   $framePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(64, 255, 255, 255), 2)
   try { $g.DrawPath($framePen, $frame) } finally { $framePen.Dispose(); $frame.Dispose() }
 
-  # Symbol: monoline "G" with integrated "H" bar (minimal + futuristic)
-  $ringRect = New-Object System.Drawing.RectangleF(208, 208, 608, 608)
-  $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 44, 232, 255), 78)
+  # New symbol concept: ultra-minimal "H" monolith + energy slash
+  # Left pillar
+  $leftPillarBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 245, 249, 255))
   try {
-    $ringPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $ringPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $g.DrawArc($ringPen, $ringRect, 34, 292)
-  } finally { $ringPen.Dispose() }
+    $leftPillar = New-RoundedRectPath -X 300 -Y 250 -W 126 -H 524 -R 62
+    try { $g.FillPath($leftPillarBrush, $leftPillar) } finally { $leftPillar.Dispose() }
+  } finally { $leftPillarBrush.Dispose() }
 
-  # Inner cut to make the mark breathe on small sizes
-  $cutBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 9, 14, 24))
+  # Right pillar
+  $rightPillarBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 245, 249, 255))
   try {
-    $cut = New-RoundedRectPath -X 490 -Y 470 -W 280 -H 136 -R 68
-    try { $g.FillPath($cutBrush, $cut) } finally { $cut.Dispose() }
-  } finally { $cutBrush.Dispose() }
+    $rightPillar = New-RoundedRectPath -X 598 -Y 250 -W 126 -H 524 -R 62
+    try { $g.FillPath($rightPillarBrush, $rightPillar) } finally { $rightPillar.Dispose() }
+  } finally { $rightPillarBrush.Dispose() }
 
-  # H-bar accent
-  $accent = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-    (New-Object System.Drawing.PointF(504, 480)),
-    (New-Object System.Drawing.PointF(760, 616)),
-    ([System.Drawing.Color]::FromArgb(255, 50, 244, 255)),
-    ([System.Drawing.Color]::FromArgb(255, 158, 108, 255))
+  # Center bridge
+  $bridge = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    (New-Object System.Drawing.PointF(426, 456)),
+    (New-Object System.Drawing.PointF(598, 568)),
+    ([System.Drawing.Color]::FromArgb(255, 48, 236, 255)),
+    ([System.Drawing.Color]::FromArgb(255, 149, 104, 255))
   )
   try {
-    $bar = New-RoundedRectPath -X 504 -Y 480 -W 252 -H 126 -R 61
-    try { $g.FillPath($accent, $bar) } finally { $bar.Dispose() }
-  } finally { $accent.Dispose() }
+    $bridgePath = New-RoundedRectPath -X 414 -Y 452 -W 196 -H 122 -R 58
+    try { $g.FillPath($bridge, $bridgePath) } finally { $bridgePath.Dispose() }
+  } finally { $bridge.Dispose() }
 
-  # tiny signal point
-  $dot = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 90, 190))
-  try { $g.FillEllipse($dot, 684, 430, 68, 68) } finally { $dot.Dispose() }
+  # Energy slash (revolutionary accent)
+  $slashPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+  try {
+    $pts = @(
+      (New-Object System.Drawing.PointF(468, 276)),
+      (New-Object System.Drawing.PointF(560, 276)),
+      (New-Object System.Drawing.PointF(454, 748)),
+      (New-Object System.Drawing.PointF(362, 748))
+    )
+    $slashPath.AddPolygon($pts)
+    $slashBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+      (New-Object System.Drawing.PointF(360, 748)),
+      (New-Object System.Drawing.PointF(560, 276)),
+      ([System.Drawing.Color]::FromArgb(255, 20, 230, 255)),
+      ([System.Drawing.Color]::FromArgb(255, 102, 150, 255))
+    )
+    try {
+      $g.FillPath($slashBrush, $slashPath)
+    } finally { $slashBrush.Dispose() }
+  } finally { $slashPath.Dispose() }
 
   # Ambient glow
   $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
   try {
-    $glowPath.AddEllipse((New-Object System.Drawing.RectangleF(176, 176, 672, 672)))
+    $glowPath.AddEllipse((New-Object System.Drawing.RectangleF(196, 190, 632, 644)))
     $pg = New-Object System.Drawing.Drawing2D.PathGradientBrush($glowPath)
     try {
-      $pg.CenterColor = [System.Drawing.Color]::FromArgb(86, 42, 220, 255)
+      $pg.CenterColor = [System.Drawing.Color]::FromArgb(72, 44, 214, 255)
       $pg.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 42, 220, 255))
-      $g.FillEllipse($pg, 176, 176, 672, 672)
+      $g.FillEllipse($pg, 196, 190, 632, 644)
     } finally { $pg.Dispose() }
   } finally { $glowPath.Dispose() }
 

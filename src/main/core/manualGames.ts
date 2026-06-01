@@ -240,7 +240,7 @@ export function removeGame(id: string): { ok: true } | { error: string } {
  */
 export async function importSteamGames(): Promise<{ added: number; updated: number }> {
   const { detectSteamGames } = await import('./steam')
-  const games = detectSteamGames()
+  const games = detectSteamGames({ includeSizes: true })
   const existing = libraryStore.load().games
   let added = 0
   let updated = 0

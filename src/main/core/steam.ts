@@ -28,6 +28,14 @@ export interface SteamGame {
   lastPlayedUnix?: number
 }
 
+export interface DetectSteamGamesOptions {
+  /**
+   * Sum full install folder sizes. Expensive on HDDs with large libraries.
+   * Disable when we only need metadata/playtime sync.
+   */
+  includeSizes?: boolean
+}
+
 const STEAM_INSTALL_PATHS = [
   'C:\\Program Files (x86)\\Steam',
   'C:\\Program Files\\Steam',
@@ -85,7 +93,8 @@ function parseManifest(text: string): { appid?: string; name?: string; installdi
   return out
 }
 
-export function detectSteamGames(): SteamGame[] {
+export function detectSteamGames(options: DetectSteamGamesOptions = {}): SteamGame[] {
+  const includeSizes = options.includeSizes ?? true
   const root = findSteamRoot()
   const libraries: string[] = []
   const usage = detectSteamUsage(root)
@@ -137,10 +146,12 @@ export function detectSteamGames(): SteamGame[] {
       }
       const installDir = join(steamapps, 'common', m.installdir)
       let size = 0
-      try {
-        size = statSync(installDir).isDirectory() ? folderSize(installDir, 0) : 0
-      } catch {
-        size = 0
+      if (includeSizes) {
+        try {
+          size = statSync(installDir).isDirectory() ? folderSize(installDir, 0) : 0
+        } catch {
+          size = 0
+        }
       }
       const appUsage = usage.get(m.appid)
       games.push({

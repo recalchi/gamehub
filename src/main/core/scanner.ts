@@ -5,6 +5,7 @@ import { BrowserWindow } from 'electron'
 import { detectPlatform } from './detector'
 import { lookupSerial, looksLikeDiscSerial } from '@shared/discSerials'
 import { detectEmulators } from './emulators'
+import { detectSteamGames, type SteamGame } from './steam'
 import { discoverExternalBiosFiles, reconcileBiosStatus, shareBiosAcrossEmulators } from './bios'
 import { homedir } from 'node:os'
 import { libraryStore, settingsStore } from './store'
@@ -262,6 +263,16 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
       )
     }
   }
+
+  try {
+    const matched = enrichPcPlaytimeFromSteam(merged)
+    if (matched > 0) {
+      log.info('scanner', `steam playtime synced into ${matched} game(s)`)
+    }
+  } catch (err) {
+    log.warn('scanner', `steam playtime sync skipped: ${String(err)}`)
+  }
+
   libraryStore.save(merged, emulators)
   progress.phase = 'done'
   progress.current = undefined
@@ -684,6 +695,91 @@ function normalizeTitle(title: string): string {
 
 function scoreCandidate(g: Game): number {
   return g.confidence * 1000 + Math.log2(Math.max(g.sizeBytes, 1))
+}
+
+function enrichPcPlaytimeFromSteam(games: Game[]): number {
+  const steam = detectSteamGames({ includeSizes: false }).filter(
+    (g) => (g.playtimeMinutes ?? 0) > 0 || (g.lastPlayedUnix ?? 0) > 0
+  )
+  if (steam.length === 0) return 0
+
+  const byAppId = new Map<string, SteamGame>()
+  const byInstallDir = new Map<string, SteamGame>()
+  const byTitle = new Map<string, SteamGame[]>()
+  for (const sg of steam) {
+    byAppId.set(sg.appId, sg)
+    const dirKey = normalizePathKey(sg.installDir)
+    if (dirKey) byInstallDir.set(dirKey, sg)
+    const key = normalizeTitle(sg.name)
+    const list = byTitle.get(key) ?? []
+    list.push(sg)
+    byTitle.set(key, list)
+  }
+
+  let touched = 0
+  for (const game of games) {
+    if (game.platform !== 'pc') continue
+    const fromUri = game.path.match(/^steam:\/\/rungameid\/(\d+)/i)?.[1]
+    const byUri = fromUri ? byAppId.get(fromUri) : undefined
+    const byPath = matchSteamByInstallDir(game.path, byInstallDir)
+    const byName = pickSteamByTitle(game, byTitle)
+    const best = byUri ?? byPath ?? byName
+    if (!best) continue
+
+    const steamSeconds = Math.max(0, Math.round((best.playtimeMinutes ?? 0) * 60))
+    const steamLastPlayed = best.lastPlayedUnix && best.lastPlayedUnix > 0
+      ? new Date(best.lastPlayedUnix * 1000).toISOString()
+      : undefined
+    const nextPlay = Math.max(game.playTime ?? 0, steamSeconds)
+    const nextLast = latestIso(game.lastPlayedAt, steamLastPlayed)
+    if (nextPlay === (game.playTime ?? 0) && nextLast === game.lastPlayedAt) continue
+
+    game.playTime = nextPlay
+    game.lastPlayedAt = nextLast
+    const flags = new Set(game.flags ?? [])
+    flags.add('steam-playtime')
+    game.flags = Array.from(flags)
+    touched += 1
+  }
+  return touched
+}
+
+function matchSteamByInstallDir(path: string, byInstallDir: Map<string, SteamGame>): SteamGame | undefined {
+  const normalized = normalizePathKey(path)
+  if (!normalized) return undefined
+  let best: SteamGame | undefined
+  let bestLen = -1
+  for (const [dir, sg] of byInstallDir.entries()) {
+    if (normalized.startsWith(dir) && dir.length > bestLen) {
+      best = sg
+      bestLen = dir.length
+    }
+  }
+  return best
+}
+
+function pickSteamByTitle(game: Game, byTitle: Map<string, SteamGame[]>): SteamGame | undefined {
+  const key = normalizeTitle(game.title)
+  const candidates = byTitle.get(key)
+  if (!candidates || candidates.length === 0) return undefined
+  if (candidates.length === 1) return candidates[0]
+  return candidates.reduce((best, cur) => {
+    const bestPlayed = best.lastPlayedUnix ?? 0
+    const curPlayed = cur.lastPlayedUnix ?? 0
+    return curPlayed > bestPlayed ? cur : best
+  })
+}
+
+function normalizePathKey(path: string | undefined): string {
+  if (!path) return ''
+  if (path.includes('://')) return path.toLowerCase()
+  return resolve(path).toLowerCase().replace(/[\\/]+/g, '\\')
+}
+
+function latestIso(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a) return b
+  if (!b) return a
+  return Date.parse(a) >= Date.parse(b) ? a : b
 }
 
 /**

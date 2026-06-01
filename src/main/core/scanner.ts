@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'
 import { join, basename, extname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { BrowserWindow } from 'electron'
@@ -87,6 +87,15 @@ const INTERNAL_PC_EXE_PATTERNS = [
   /service/i,
   /setup/i,
   /launcher/i,
+  /onlinefix/i,
+  /artbook/i,
+  /soundtrack/i,
+  /benchmark/i,
+  /language selector/i,
+  /texconv/i,
+  /ffmpeg/i,
+  /handler/i,
+  /uploader/i,
   /^leagueclient/i,
   /^riot client$/i,
   /^riotclient/i
@@ -145,7 +154,8 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
   // Hard deadline. If the walker runs into a pathological tree (network share,
   // symlink loop, an emulator we didn't recognise) we still want to return
   // partial results rather than block the splash forever.
-  const deadline = Date.now() + 25_000
+  const deadline = Date.now() + 90_000
+  let deadlineExceeded = false
 
   // 2. Walk game roots
   const candidates: string[] = []
@@ -165,6 +175,7 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
       const msg = `scan deadline exceeded after ${candidates.length} candidates — returning partial results`
       errors.push(msg)
       log.warn('scanner', msg)
+      deadlineExceeded = true
       break
     }
   }
@@ -190,7 +201,7 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
   // `D:\Jogos\PS2\God of War (USA)\God of War (USA).iso`. We collapse those
   // to one entry per (platform, normalized-title), keeping the candidate with
   // the highest confidence + largest file (proxy for "most complete copy").
-  const games = dedupeGames(raw)
+  const games = dedupeGames(prunePcLaunchers(raw))
   if (games.length !== raw.length) {
     log.info('scanner', `deduplicated ${raw.length - games.length} duplicate(s)`)
   }
@@ -232,8 +243,15 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
   // The "fresh" flag bypasses preservation since it explicitly means "rebuild
   // from scratch".
   let merged = games
-  if (!opts.fresh) {
-    const prev = libraryStore.load().games
+  const prev = libraryStore.load().games
+  if (deadlineExceeded) {
+    const scannedIds = new Set(games.map((g) => g.id))
+    const carried = prev.filter((g) => !scannedIds.has(g.id))
+    merged = [...games, ...carried]
+    if (carried.length > 0) {
+      log.info('scanner', `preserved ${carried.length} existing game(s) due to partial scan`)
+    }
+  } else if (!opts.fresh) {
     const manualPreserved = prev.filter((g) => g.flags?.includes('adicionado manualmente'))
     const scannedIds = new Set(games.map((g) => g.id))
     merged = [...games, ...manualPreserved.filter((g) => !scannedIds.has(g.id))]
@@ -274,6 +292,9 @@ function walk(
   } catch {
     return
   }
+  const dirs: Array<{ entry: string; full: string }> = []
+  const files: Array<{ entry: string; full: string }> = []
+
   for (const entry of entries) {
     if (Date.now() > deadline) return
     const full = join(root, entry)
@@ -284,30 +305,14 @@ function walk(
       continue
     }
     onVisit(full)
+    if (st.isDirectory()) dirs.push({ entry, full })
+    else files.push({ entry, full })
+  }
 
-    if (st.isDirectory()) {
-      const lower = entry.toLowerCase()
-      if (SKIP_DIRS.has(lower)) continue
-      if (SKIP_PREFIXES.some((p) => lower.startsWith(p))) continue
-      // Skip subtrees that are emulator installations — their bundled samples
-      // and DLLs are not games.
-      const fullLower = full.toLowerCase().replace(/\\+$/, '')
-      if (emulatorPaths.has(fullLower)) continue
-      // PS3 game folder is itself a candidate — but only do this expensive
-      // probe when the parent or name suggests we might actually be near one.
-      try {
-        const children = readdirSync(full).map((c) => c.toLowerCase())
-        if (children.includes('ps3_game')) {
-          out.push(full)
-          continue
-        }
-      } catch {
-        /* unreadable, skip */
-      }
-      walk(full, out, emulatorPaths, deadline, onVisit)
-      continue
-    }
-
+  // Files first: this makes top-level launch executables (e.g. GoW.exe)
+  // show up even when deep asset trees would otherwise consume the deadline.
+  for (const { entry, full } of files) {
+    if (Date.now() > deadline) return
     const ext = extname(entry).slice(1).toLowerCase()
     if (!ext) continue
     if (!KNOWN_EXTENSIONS.has(ext)) continue
@@ -323,6 +328,30 @@ function walk(
     if (isIgnoredPcCandidate(full, entry, ext)) continue
     out.push(full)
   }
+
+  for (const { entry, full } of dirs) {
+    if (Date.now() > deadline) return
+    const lower = entry.toLowerCase()
+    if (SKIP_DIRS.has(lower)) continue
+    if (SKIP_PREFIXES.some((p) => lower.startsWith(p))) continue
+    if (lower === 'wad' && full.toLowerCase().includes('\\pc\\')) continue
+    // Skip subtrees that are emulator installations — their bundled samples
+    // and DLLs are not games.
+    const fullLower = full.toLowerCase().replace(/\\+$/, '')
+    if (emulatorPaths.has(fullLower)) continue
+    // PS3 game folder is itself a candidate — but only do this expensive
+    // probe when the parent or name suggests we might actually be near one.
+    try {
+      const children = readdirSync(full).map((c) => c.toLowerCase())
+      if (children.includes('ps3_game')) {
+        out.push(full)
+        continue
+      }
+    } catch {
+      /* unreadable, skip */
+    }
+    walk(full, out, emulatorPaths, deadline, onVisit)
+  }
 }
 
 function isIgnoredPcCandidate(path: string, filename: string, ext: string): boolean {
@@ -335,15 +364,29 @@ function isIgnoredPcCandidate(path: string, filename: string, ext: string): bool
     lowerPath.includes('\\launcher\\') ||
     lowerPath.includes('\\installer\\') ||
     lowerPath.includes('\\redist\\') ||
-    lowerPath.includes('\\support\\')
+    lowerPath.includes('\\support\\') ||
+    lowerPath.includes('\\_commonredist\\') ||
+    lowerPath.includes('\\easyanticheat\\') ||
+    lowerPath.includes('\\artbook') ||
+    lowerPath.includes('\\soundtrack')
   )
 }
 
 function isIgnoredInternalAsset(path: string, ext: string): boolean {
-  if (!['bin', 'gz'].includes(ext)) return false
+  if (!['bin', 'gz', 'wad'].includes(ext)) return false
   const lowerName = basename(path).toLowerCase()
-  if (lowerName === 'snapshot_blob.bin' || lowerName === 'v8_context_snapshot.bin') return true
+  if (
+    lowerName === 'snapshot_blob.bin' ||
+    lowerName === 'v8_context_snapshot.bin' ||
+    lowerName === 'catalog.bin' ||
+    lowerName === 'regulation.bin'
+  ) {
+    return true
+  }
   const lower = path.toLowerCase()
+  if (ext === 'wad' && (lower.includes('\\exec\\wad\\') || lower.includes('\\pc_le\\'))) {
+    return true
+  }
   return (
     lower.includes('\\engine\\') ||
     lower.includes('\\binaries\\') ||
@@ -422,15 +465,15 @@ function classify(
   const id = createHash('sha1').update(resolve(path).toLowerCase()).digest('hex').slice(0, 16)
   const prev = previous.get(id)
 
-  const matchedEmulator = pickEmulator(platform, emulators)
-  const status = computeStatus(det, matchedEmulator)
+  const matchedEmulator = platform === 'pc' ? undefined : pickEmulator(platform, emulators)
+  const status = platform === 'pc' ? 'ready' : computeStatus(det, matchedEmulator)
 
   const game: Game = {
     id,
     title: prev?.title ?? title,
     path,
     platform,
-    emulator: matchedEmulator?.id,
+    emulator: platform === 'pc' ? 'native' : matchedEmulator?.id,
     sizeBytes: st.isDirectory() ? 0 : st.size,
     confidence: det.confidence,
     status,
@@ -483,6 +526,124 @@ function indexPrevious(): Map<string, Game> {
   const idx = new Map<string, Game>()
   for (const g of libraryStore.load().games) idx.set(g.id, g)
   return idx
+}
+
+/**
+ * PC folders often contain many helper executables (crash handlers, language
+ * selectors, redists, artbooks). Keep only the best launcher per game root.
+ */
+function prunePcLaunchers(games: Game[]): Game[] {
+  const keep: Game[] = []
+  const bestByRoot = new Map<string, { game: Game; score: number }>()
+  const sizeByRoot = new Map<string, number>()
+  for (const game of games) {
+    if (game.platform !== 'pc') {
+      keep.push(game)
+      continue
+    }
+    const ext = extname(game.path).toLowerCase()
+    if (!['.exe', '.bat', '.cmd', '.lnk', '.url', '.jar'].includes(ext)) continue
+    const rootDir = pcCollectionRootDir(game.path)
+    const root = rootDir.toLowerCase()
+    const score = scorePcLauncherCandidate(game)
+    const current = bestByRoot.get(root)
+    if (!current || score > current.score) {
+      bestByRoot.set(root, { game, score })
+    }
+  }
+  for (const [root, { game }] of bestByRoot.entries()) {
+    let installSize = sizeByRoot.get(root)
+    if (installSize === undefined) {
+      installSize = directorySizeBytes(pcCollectionRootDir(game.path))
+      sizeByRoot.set(root, installSize)
+    }
+    keep.push({
+      ...game,
+      emulator: 'native',
+      status: 'ready',
+      sizeBytes: installSize > 0 ? installSize : game.sizeBytes
+    })
+  }
+  return keep
+}
+
+function pcCollectionRoot(path: string): string {
+  return pcCollectionRootDir(path).toLowerCase()
+}
+
+function pcCollectionRootDir(path: string): string {
+  const parts = path.split(/[\\/]+/)
+  const pcIndex = parts.findIndex((part) => part.toLowerCase() === 'pc')
+  if (pcIndex >= 0 && parts.length > pcIndex + 1) {
+    return parts.slice(0, pcIndex + 2).join('\\')
+  }
+  const epicIndex = parts.findIndex((part) => part.toLowerCase() === 'epicgames')
+  if (epicIndex >= 0 && parts.length > epicIndex + 1) {
+    return parts.slice(0, epicIndex + 2).join('\\')
+  }
+  return parts.slice(0, Math.max(parts.length - 1, 1)).join('\\')
+}
+
+function directorySizeBytes(root: string): number {
+  let total = 0
+  const stack = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    let entries: string[]
+    try {
+      entries = readdirSync(current)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = join(current, entry)
+      let st
+      try {
+        st = lstatSync(full)
+      } catch {
+        continue
+      }
+      if (st.isSymbolicLink()) continue
+      if (st.isDirectory()) {
+        stack.push(full)
+        continue
+      }
+      total += st.size
+    }
+  }
+  return total
+}
+
+function scorePcLauncherCandidate(game: Game): number {
+  const lowerPath = game.path.toLowerCase()
+  const filename = basename(lowerPath)
+  const base = basename(lowerPath, extname(lowerPath))
+  const ext = extname(lowerPath)
+  const root = pcCollectionRoot(game.path).split('\\').pop() ?? ''
+  const cleanBase = base.replace(/[^a-z0-9]+/g, '')
+  const cleanRoot = root.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  let score = 0
+  if (ext === '.exe') score += 240
+  if (lowerPath.includes('\\game\\')) score += 110
+  if (cleanBase && cleanRoot && (cleanBase.includes(cleanRoot) || cleanRoot.includes(cleanBase))) {
+    score += 180
+  }
+  if (/\bstart\b|\bplay\b|\blaunch\b/.test(base)) score += 35
+  if (/\bprotected\b|easyanticheat|artbook|soundtrack|benchmark|language selector/.test(base)) {
+    score -= 260
+  }
+  if (INTERNAL_PC_EXE_PATTERNS.some((pattern) => pattern.test(filename))) score -= 220
+  if (
+    lowerPath.includes('\\_commonredist\\') ||
+    lowerPath.includes('\\redist\\') ||
+    lowerPath.includes('\\support\\') ||
+    lowerPath.includes('\\tools\\') ||
+    lowerPath.includes('\\engine\\')
+  ) {
+    score -= 220
+  }
+  score += Math.log2(Math.max(game.sizeBytes, 1))
+  return score
 }
 
 /**

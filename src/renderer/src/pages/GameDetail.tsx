@@ -22,13 +22,14 @@ import {
   Square,
   Settings as SettingsIcon,
   Sliders,
+  Trophy,
   Trash2,
   X
 } from 'lucide-react'
 import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 import { EMULATORS } from '@shared/emulators'
-import type { Game, GameAchievementDetail } from '@shared/types'
+import type { Game, GameAchievementDetail, GameCompletionStatus } from '@shared/types'
 import SaveManagerPanel from '../components/SaveManagerPanel'
 import BiosPanel from '../components/BiosPanel'
 import CrashHistoryPanel from '../components/CrashHistoryPanel'
@@ -62,7 +63,7 @@ export default function GameDetail(): JSX.Element {
   const [isActive, setIsActive] = useState(false)
   // Tabbed lower panel — keeps the play button close to the top while still
   // letting the user reach BIOS/emulator/metadata/crashes without scrolling.
-  type DetailTab = 'setup' | 'history' | 'achievements' | 'details'
+  type DetailTab = 'setup' | 'history' | 'achievements' | 'journey' | 'details'
   const [tab, setTab] = useState<DetailTab>('setup')
 
   useEffect(() => {
@@ -258,27 +259,12 @@ export default function GameDetail(): JSX.Element {
                 <FolderOpen className="w-4 h-4" /> Abrir pasta
               </button>
               <button
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      `Remover "${game.title}" da biblioteca?\n\nO arquivo no disco NÃO será apagado — apenas a entrada do GameHub.`
-                    )
-                  )
-                    return
-                  const r = await window.api.library.remove(game.id)
-                  if ('error' in r) {
-                    alert(`Falha: ${r.error}`)
-                    return
-                  }
-                  useLibraryStore.setState((s) => ({
-                    games: s.games.filter((g) => g.id !== game.id)
-                  }))
-                  navigate('/library', { replace: true })
-                }}
+                type="button"
+                onClick={() => setTab('journey')}
                 className="ml-auto px-5 py-3 text-rose-300 hover:bg-rose-500/10 rounded-lg flex items-center gap-2 transition-all"
-                title="Remover da biblioteca"
+                title="Arquivar e remover"
               >
-                <Trash2 className="w-4 h-4" /> Remover
+                <Trash2 className="w-4 h-4" /> Arquivar/remover
               </button>
             </div>
 
@@ -318,6 +304,17 @@ export default function GameDetail(): JSX.Element {
                 </div>
               )}
               {tab === 'achievements' && <AchievementsPanel detail={achievements} />}
+              {tab === 'journey' && (
+                <JourneyTrackerPanel
+                  game={game}
+                  onRemoved={() => {
+                    useLibraryStore.setState((s) => ({
+                      games: s.games.filter((g) => g.id !== game.id)
+                    }))
+                    navigate('/library', { replace: true })
+                  }}
+                />
+              )}
               {tab === 'details' && (
                 <div className="space-y-3">
                   <MetadataEditor game={game} />
@@ -349,17 +346,18 @@ function DetailTabs({
   tab,
   onChange
 }: {
-  tab: 'setup' | 'history' | 'achievements' | 'details'
-  onChange: (next: 'setup' | 'history' | 'achievements' | 'details') => void
+  tab: 'setup' | 'history' | 'achievements' | 'journey' | 'details'
+  onChange: (next: 'setup' | 'history' | 'achievements' | 'journey' | 'details') => void
 }): JSX.Element {
   const tabs: Array<{
-    id: 'setup' | 'history' | 'achievements' | 'details'
+    id: 'setup' | 'history' | 'achievements' | 'journey' | 'details'
     label: string
     icon: typeof Sliders
   }> = [
     { id: 'setup', label: 'Configurar', icon: Sliders },
     { id: 'history', label: 'Histórico', icon: Activity },
     { id: 'achievements', label: 'Conquistas', icon: Award },
+    { id: 'journey', label: 'Zerados', icon: Trophy },
     { id: 'details', label: 'Detalhes', icon: FileText }
   ]
   return (
@@ -434,7 +432,7 @@ function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null })
         </div>
         <Link
           to="/achievements"
-          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+          className="rounded-md bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-white/10"
         >
           Central
         </Link>
@@ -493,6 +491,169 @@ function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null })
       )}
     </section>
   )
+}
+
+function JourneyTrackerPanel({
+  game,
+  onRemoved
+}: {
+  game: Game
+  onRemoved: () => void
+}): JSX.Element {
+  const [status, setStatus] = useState<GameCompletionStatus>('played')
+  const [redownloadUrl, setRedownloadUrl] = useState('')
+  const [captureSave, setCaptureSave] = useState(true)
+  const [busy, setBusy] = useState<'track' | 'remove' | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void window.api.journey.list().then((records) => {
+      if (!alive) return
+      const current = records.find((record) => record.gameId === game.id)
+      if (!current) return
+      setStatus(current.status)
+      setRedownloadUrl(current.redownloadUrl ?? '')
+    })
+    return () => {
+      alive = false
+    }
+  }, [game.id])
+
+  async function saveJourney(): Promise<void> {
+    setBusy('track')
+    const result = await window.api.journey.upsert({
+      gameId: game.id,
+      status,
+      redownloadUrl: redownloadUrl.trim() || undefined,
+      sourceLabel: 'GameHub',
+      sourceUrl: redownloadUrl.trim() || undefined,
+      captureSave
+    })
+    setBusy(null)
+    if ('error' in result) {
+      setMsg(result.error)
+      return
+    }
+    setMsg(
+      result.saveWarning
+        ? `Jornada salva, mas o backup de save não foi feito: ${result.saveWarning}`
+        : 'Jornada salva em Conquistas.'
+    )
+  }
+
+  async function archiveAndRemove(): Promise<void> {
+    if (!redownloadUrl.trim()) {
+      setMsg('Informe o link para baixar/reinstalar depois.')
+      return
+    }
+    if (
+      !confirm(
+        `Arquivar "${game.title}" como ${labelForStatus(status)} e remover da biblioteca?\n\nA entrada de conquista continua salva com capa e histórico.`
+      )
+    ) {
+      return
+    }
+    setBusy('remove')
+    const result = await window.api.library.archiveRemove({
+      gameId: game.id,
+      status,
+      redownloadUrl: redownloadUrl.trim(),
+      sourceLabel: 'GameHub',
+      sourceUrl: redownloadUrl.trim(),
+      captureSave
+    })
+    setBusy(null)
+    if ('error' in result) {
+      setMsg(result.error)
+      return
+    }
+    onRemoved()
+  }
+
+  return (
+    <section id="journey-archive" className="glass rounded-xl p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-display font-semibold text-sm">Conquistas / Zerados</h3>
+          <p className="text-[11px] text-slate-400">
+            Salva progresso independente do jogo instalado (capa + status + referência de re-download).
+          </p>
+        </div>
+        <Link
+          to="/achievements"
+          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
+        >
+          Abrir central
+        </Link>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label className="md:col-span-1">
+          <span className="text-[11px] uppercase tracking-wider text-slate-500">Status</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as GameCompletionStatus)}
+            className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none focus:border-accent"
+          >
+            <option value="played">Jogado</option>
+            <option value="completed">Zerado</option>
+            <option value="platinum">Platinado</option>
+          </select>
+        </label>
+
+        <label className="md:col-span-2">
+          <span className="text-[11px] uppercase tracking-wider text-slate-500">
+            Link para baixar depois (obrigatório para excluir)
+          </span>
+          <input
+            value={redownloadUrl}
+            onChange={(e) => setRedownloadUrl(e.currentTarget.value)}
+            placeholder="https://...  ou  steam://rungameid/..."
+            className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+
+      <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={captureSave}
+          onChange={(e) => setCaptureSave(e.currentTarget.checked)}
+          className="rounded border-white/20 bg-white/5"
+        />
+        Criar snapshot de save neste registro
+      </label>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void saveJourney()}
+          disabled={busy !== null}
+          className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/15 disabled:opacity-60"
+        >
+          {busy === 'track' ? 'Salvando…' : 'Salvar progresso'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void archiveAndRemove()}
+          disabled={busy !== null}
+          className="rounded-lg bg-rose-500/90 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-60 inline-flex items-center gap-2"
+        >
+          <Trash2 className="w-4 h-4" />
+          {busy === 'remove' ? 'Arquivando…' : 'Arquivar e remover da biblioteca'}
+        </button>
+      </div>
+
+      {msg && <p className="mt-2 text-xs text-accent">{msg}</p>}
+    </section>
+  )
+}
+
+function labelForStatus(status: GameCompletionStatus): string {
+  if (status === 'platinum') return 'Platinado'
+  if (status === 'completed') return 'Zerado'
+  return 'Jogado'
 }
 
 /**

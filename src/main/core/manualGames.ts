@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, basename, extname, join } from 'node:path'
 import { libraryStore, settingsStore } from './store'
@@ -53,7 +53,7 @@ export function addManualGame(input: ManualGameInput): Game | { error: string } 
     path: resolvedPath,
     platform: input.platform,
     emulator,
-    sizeBytes: 0,
+    sizeBytes: estimateGameSizeBytes(resolvedPath, input.platform),
     confidence: 1,
     status,
     addedAt: new Date().toISOString(),
@@ -71,6 +71,62 @@ export function addManualGame(input: ManualGameInput): Game | { error: string } 
   libraryStore.addGame(game)
   log.info('manual', `added manual game: ${game.title} (${game.platform}) at ${game.path}`)
   return game
+}
+
+function estimateGameSizeBytes(path: string, platform: PlatformId): number {
+  try {
+    const st = statSync(path)
+    if (st.isDirectory()) return directorySizeBytes(path)
+    if (platform === 'pc') {
+      const root = pcInstallRootDir(path)
+      const rootSize = directorySizeBytes(root)
+      return rootSize > 0 ? rootSize : st.size
+    }
+    return st.size
+  } catch {
+    return 0
+  }
+}
+
+function pcInstallRootDir(path: string): string {
+  const parts = path.split(/[\\/]+/)
+  const pcIndex = parts.findIndex((part) => part.toLowerCase() === 'pc')
+  if (pcIndex >= 0 && parts.length > pcIndex + 1) return parts.slice(0, pcIndex + 2).join('\\')
+  const epicIndex = parts.findIndex((part) => part.toLowerCase() === 'epicgames')
+  if (epicIndex >= 0 && parts.length > epicIndex + 1) {
+    return parts.slice(0, epicIndex + 2).join('\\')
+  }
+  return parts.slice(0, Math.max(parts.length - 1, 1)).join('\\')
+}
+
+function directorySizeBytes(root: string): number {
+  let total = 0
+  const stack = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    let entries: string[]
+    try {
+      entries = readdirSync(current)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = join(current, entry)
+      let st
+      try {
+        st = lstatSync(full)
+      } catch {
+        continue
+      }
+      if (st.isSymbolicLink()) continue
+      if (st.isDirectory()) {
+        stack.push(full)
+        continue
+      }
+      total += st.size
+    }
+  }
+  return total
 }
 
 const PC_LAUNCH_EXTENSIONS = new Set(['.exe', '.bat', '.cmd', '.lnk', '.url', '.jar'])

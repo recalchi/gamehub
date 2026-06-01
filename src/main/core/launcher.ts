@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { BrowserWindow, screen, shell } from 'electron'
 import { buildLaunchArgs } from './emulators'
@@ -210,12 +210,16 @@ async function killProcessTree(
 async function discoverLikelyLaunchPids(launch: ActiveLaunchType): Promise<number[]> {
   if (process.platform !== 'win32') return []
   const safeExePath = launch.executablePath?.replace(/'/g, "''") ?? ''
+  const safeExeDir = launch.executablePath
+    ? launch.executablePath.replace(/[\\/][^\\/]+$/, '').replace(/'/g, "''")
+    : ''
   const safeProcessName = launch.processName?.replace(/'/g, "''") ?? ''
   const safeStartedAt = launch.startedAt.replace(/'/g, "''")
   const safePid = launch.pid ?? 0
   const script = `
 $targetPid = ${safePid}
 $exePath = '${safeExePath}'
+$exeDir = '${safeExeDir}'
 $procName = '${safeProcessName}'
 $startedAt = [datetime]'${safeStartedAt}'
 $cutoff = $startedAt.AddMinutes(-3)
@@ -232,6 +236,13 @@ if ($hits.Count -eq 0 -and $procName) {
   $nameB = if ($procName.ToLower().EndsWith('.exe')) { $procName.Substring(0, $procName.Length - 4) } else { $procName }
   $hits += $all | Where-Object {
     ($_.Name -ieq $nameA -or $_.Name -ieq $nameB) -and
+    ([Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate) -ge $cutoff)
+  }
+}
+if ($hits.Count -eq 0 -and $exeDir) {
+  $hits += $all | Where-Object {
+    $_.ExecutablePath -and
+    $_.ExecutablePath.ToLower().StartsWith($exeDir.ToLower()) -and
     ([Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate) -ge $cutoff)
   }
 }
@@ -716,13 +727,44 @@ async function launchExternalStore(game: Game, storeName: string): Promise<Launc
   }
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Some PC games immediately hand off from a bootstrap EXE to a different
+ * process (EAC/start_protected_game/etc). If we end the session on the first
+ * child exit, telemetry dies even while the game is running.
+ */
+async function adoptNativeSuccessorPid(gameId: string, exitedPid: number | undefined): Promise<boolean> {
+  const deadline = Date.now() + 45_000
+  let firstProbe = true
+  while (Date.now() < deadline) {
+    const launch = active.get(gameId)
+    if (!launch) return false
+    await delay(firstProbe ? 1200 : 1600)
+    firstProbe = false
+    const candidates = await discoverLikelyLaunchPids(launch)
+    const nextPid = candidates.find((pid) => pid > 0 && pid !== exitedPid)
+    if (!nextPid) continue
+    launch.pid = nextPid
+    log.info('launcher', `adopted successor pid ${nextPid} for ${launch.gameTitle}`)
+    return true
+  }
+  return false
+}
+
 async function launchNative(game: Game): Promise<LaunchResult> {
   if (!existsSync(game.path)) {
     return { ok: false, error: `Arquivo não encontrado: ${game.path}` }
   }
   try {
     const startedAt = Date.now()
-    const child = spawn(game.path, [], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(game.path, [], {
+      cwd: dirname(game.path),
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
     const output = new RingBuffer(OUTPUT_BUFFER_LINES)
     child.stdout?.on('data', (chunk: Buffer) => output.push(chunk))
     child.stderr?.on('data', (chunk: Buffer) => output.push(chunk))
@@ -742,14 +784,20 @@ async function launchNative(game: Game): Promise<LaunchResult> {
     }
     child.on('error', () => markEnded(game.id))
     child.on('exit', (code) => {
-      const userStopped = forceStopping.delete(game.id)
-      const seconds = recordPlaySession(game, startedAt)
-      const tail = output.flush()
-      markEnded(game.id)
-      if (!userStopped && code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
-        if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
-        broadcastFailure(game, code, seconds, 'Windows', tail)
-      }
+      void (async () => {
+        const userStopped = forceStopping.delete(game.id)
+        if (!userStopped) {
+          const adopted = await adoptNativeSuccessorPid(game.id, child.pid)
+          if (adopted) return
+        }
+        const seconds = recordPlaySession(game, startedAt)
+        const tail = output.flush()
+        markEnded(game.id)
+        if (!userStopped && code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
+          if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
+          broadcastFailure(game, code, seconds, 'Windows', tail)
+        }
+      })()
     })
     return { ok: true, pid: child.pid, command: game.path }
   } catch (err) {

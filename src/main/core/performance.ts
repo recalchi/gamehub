@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { cpus, freemem, totalmem } from 'node:os'
+import { dirname } from 'node:path'
 import { promisify } from 'node:util'
 import { BrowserWindow } from 'electron'
 import { settingsStore } from './store'
@@ -10,6 +11,7 @@ import type { ActiveLaunch, PerformanceReport, PerformanceSample } from '@shared
 const execFileAsync = promisify(execFile)
 
 interface ProcessSnapshot {
+  pid?: number
   name?: string
   cpuSeconds?: number
   workingSetBytes?: number
@@ -76,6 +78,7 @@ export function startPerformanceMonitor(launch: ActiveLaunch): void {
 
 /** How many consecutive empty samples before we declare the session over. */
 const MAX_MISSES = 4
+const NATIVE_BOOT_MAX_MISSES = 25
 
 export function stopPerformanceMonitor(gameId: string, publishReport = true): PerformanceReport | null {
   const state = sessions.get(gameId)
@@ -120,18 +123,32 @@ async function sampleSession(gameId: string): Promise<void> {
   state.busy = true
 
   try {
-    const snapshot = await queryProcess(state.launch.pid, state.launch.processName, gameId)
+    const snapshot = await queryProcess(
+      state.launch.pid,
+      state.launch.processName,
+      state.launch.executablePath,
+      gameId
+    )
     if (!snapshot) {
       // Don't kill the session on a single empty sample — PowerShell sometimes
       // hiccups, and emulators that fork a worker subprocess can briefly leave
       // us with no matching PID. Stop only after several misses in a row.
       state.missCount += 1
-      if (state.missCount >= MAX_MISSES) {
+      const missLimit =
+        state.launch.emulatorName === 'Windows' ? NATIVE_BOOT_MAX_MISSES : MAX_MISSES
+      if (state.missCount >= missLimit) {
         stopPerformanceMonitor(gameId)
       }
       return
     }
     state.missCount = 0
+    const resolvedName = normalizeProcessName(snapshot.name)
+    if (resolvedName && state.launch.processName !== resolvedName) {
+      state.launch.processName = resolvedName
+    }
+    if (snapshot.pid && snapshot.pid > 0 && state.launch.pid !== snapshot.pid) {
+      state.launch.pid = snapshot.pid
+    }
 
     const now = Date.now()
     let cpuPercent: number | undefined
@@ -150,8 +167,8 @@ async function sampleSession(gameId: string): Promise<void> {
       gameId,
       gameTitle: state.launch.gameTitle,
       emulatorName: state.launch.emulatorName,
-      pid: state.launch.pid,
-      processName: snapshot.name,
+      pid: snapshot.pid ?? state.launch.pid,
+      processName: snapshot.name ?? state.launch.processName,
       sampledAt: new Date(now).toISOString(),
       elapsedSeconds: Math.max(0, Math.round((now - state.startedAtMs) / 1000)),
       cpuPercent,
@@ -203,6 +220,7 @@ const sampleTick = new Map<string, number>()
 async function queryProcess(
   pid: number | undefined,
   processName: string | undefined,
+  executablePath: string | undefined,
   gameId: string
 ): Promise<ProcessSnapshot | null> {
   if (process.platform !== 'win32') return null
@@ -211,30 +229,44 @@ async function queryProcess(
   // --- Step 1: fast Get-Process for CPU/RAM/title. No Get-Counter here —
   // perf counters can take 1-2s each and were causing the whole query to
   // time out for shadPS4 sessions, leaving the UI permanently showing "--".
-  const safeName = processName?.replace(/'/g, "''") ?? ''
+  const safeName = normalizeProcessName(processName)?.replace(/'/g, "''") ?? ''
+  const safeDir = (executablePath ? dirname(executablePath) : '').replace(/'/g, "''")
   const command = `
     $hint = '${safeName}'
+    $hintDir = '${safeDir}'
     $procs = @()
     if ($hint) {
       $procs = @(Get-Process -Name $hint -ErrorAction SilentlyContinue)
     }
     ${pid ? `if ($procs.Count -eq 0) { $procs = @(Get-Process -Id ${pid} -ErrorAction SilentlyContinue) }` : ''}
+    if ($procs.Count -eq 0 -and $hintDir) {
+      try {
+        $ids = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+          Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($hintDir.ToLower()) } |
+          Select-Object -ExpandProperty ProcessId -Unique)
+        if ($ids.Count -gt 0) {
+          $procs = @(Get-Process -Id $ids -ErrorAction SilentlyContinue)
+        }
+      } catch {}
+    }
     if ($procs.Count -eq 0) { exit 2 }
     $cpuSum = 0.0; $wsSum = [int64]0; $pvtSum = [int64]0
-    $allResponding = $true; $title = $null; $name = $null; $pids = @()
+    $allResponding = $true; $title = $null; $name = $null; $pids = @(); $leadPid = $null; $leadWs = [int64]-1
     foreach ($p in $procs) {
       try { $cpuSum += [double]$p.CPU } catch {}
-      try { $wsSum += [int64]$p.WorkingSet64 } catch {}
+      $ws = [int64]0
+      try { $ws = [int64]$p.WorkingSet64; $wsSum += $ws } catch {}
       try { $pvtSum += [int64]$p.PrivateMemorySize64 } catch {}
       try { if (-not $p.Responding) { $allResponding = $false } } catch {}
       if (-not $title) { try { if ($p.MainWindowTitle) { $title = $p.MainWindowTitle } } catch {} }
       if (-not $name) { $name = $p.ProcessName }
+      if ($ws -gt $leadWs) { $leadWs = $ws; $leadPid = $p.Id }
       $pids += $p.Id
     }
     [PSCustomObject]@{
       Name = $name; CPU = $cpuSum; WorkingSet64 = $wsSum; PrivateMemorySize64 = $pvtSum
       Responding = $allResponding; Title = $title; Instances = $procs.Count
-      Pids = ($pids -join ',')
+      Pids = ($pids -join ','); LeadPid = $leadPid
     } | ConvertTo-Json -Compress
   `
 
@@ -247,6 +279,7 @@ async function queryProcess(
     Title?: string | null
     Instances?: number
     Pids?: string
+    LeadPid?: number | null
   }
   try {
     const { stdout } = await execFileAsync(
@@ -277,6 +310,7 @@ async function queryProcess(
   }
 
   return {
+    pid: parsed.LeadPid ?? undefined,
     name: parsed.Name,
     cpuSeconds: parsed.CPU ?? undefined,
     workingSetBytes: parsed.WorkingSet64 ?? undefined,
@@ -318,6 +352,11 @@ async function queryGpu(
     gpuMemoryBytes: parsed.Vram ?? undefined,
     takenAtMs: Date.now()
   }
+}
+
+function normalizeProcessName(name: string | undefined): string | undefined {
+  if (!name) return undefined
+  return name.trim().replace(/\.exe$/i, '').toLowerCase()
 }
 
 /**

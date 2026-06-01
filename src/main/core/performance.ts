@@ -127,6 +127,8 @@ async function sampleSession(gameId: string): Promise<void> {
       state.launch.pid,
       state.launch.processName,
       state.launch.executablePath,
+      state.launch.gameTitle,
+      state.launch.startedAt,
       gameId
     )
     if (!snapshot) {
@@ -221,19 +223,26 @@ async function queryProcess(
   pid: number | undefined,
   processName: string | undefined,
   executablePath: string | undefined,
+  gameTitle: string,
+  launchStartedAt: string,
   gameId: string
 ): Promise<ProcessSnapshot | null> {
   if (process.platform !== 'win32') return null
-  if (!pid && !processName) return null
+  if (!pid && !processName && !gameTitle.trim()) return null
 
   // --- Step 1: fast Get-Process for CPU/RAM/title. No Get-Counter here —
   // perf counters can take 1-2s each and were causing the whole query to
   // time out for shadPS4 sessions, leaving the UI permanently showing "--".
   const safeName = normalizeProcessName(processName)?.replace(/'/g, "''") ?? ''
   const safeDir = (executablePath ? dirname(executablePath) : '').replace(/'/g, "''")
+  const safeTitleHint = gameTitle.trim().toLowerCase().replace(/'/g, "''")
+  const safeStartedAt = launchStartedAt.replace(/'/g, "''")
   const command = `
     $hint = '${safeName}'
     $hintDir = '${safeDir}'
+    $titleHint = '${safeTitleHint}'
+    $startedAt = [datetime]'${safeStartedAt}'
+    $cutoff = $startedAt.AddMinutes(-10)
     $procs = @()
     if ($hint) {
       $procs = @(Get-Process -Name $hint -ErrorAction SilentlyContinue)
@@ -247,6 +256,15 @@ async function queryProcess(
         if ($ids.Count -gt 0) {
           $procs = @(Get-Process -Id $ids -ErrorAction SilentlyContinue)
         }
+      } catch {}
+    }
+    if ($procs.Count -eq 0 -and $titleHint) {
+      try {
+        $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+          $_.MainWindowTitle -and
+          $_.MainWindowTitle.ToLower().Contains($titleHint) -and
+          $_.StartTime -ge $cutoff
+        })
       } catch {}
     }
     if ($procs.Count -eq 0) { exit 2 }
@@ -326,19 +344,36 @@ async function queryGpu(
   pidsCsv: string
 ): Promise<{ gpuPercent?: number; gpuMemoryBytes?: number; takenAtMs: number } | undefined> {
   const command = `
-    $pids = '${pidsCsv}'.Split(',')
+    $pids = @('${pidsCsv}'.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\\d+$' })
     $gpuTotal = 0.0
     $vramTotal = [int64]0
+    $gpuSamples = @()
+    $vramSamples = @()
+    try {
+      $gpuSamples = @((Get-Counter "\\GPU Engine(*engtype_3D)\\Utilization Percentage" -ErrorAction SilentlyContinue).CounterSamples)
+    } catch {}
+    try {
+      $vramSamples = @((Get-Counter "\\GPU Process Memory(*)\\Dedicated Usage" -ErrorAction SilentlyContinue).CounterSamples)
+    } catch {}
     foreach ($id in $pids) {
+      $needle = "pid_$($id)_"
+      $g = @($gpuSamples | Where-Object { $_.Path -like "*$needle*" })
+      if ($g.Count -gt 0) { $gpuTotal += (($g | Measure-Object CookedValue -Sum).Sum) }
+      $v = @($vramSamples | Where-Object { $_.Path -like "*$needle*" })
+      if ($v.Count -gt 0) { $vramTotal += [int64](($v | Measure-Object CookedValue -Sum).Sum) }
+    }
+
+    if ($gpuTotal -le 0 -and $pids.Count -gt 0) {
+      # Fallback: some systems block per-instance counter paths; WMI class still works.
       try {
-        $g = (Get-Counter "\\GPU Engine(pid_$id*engtype_3D)\\Utilization Percentage" -ErrorAction SilentlyContinue).CounterSamples
-        if ($g) { $gpuTotal += ($g | Measure-Object CookedValue -Sum).Sum }
-      } catch {}
-      try {
-        $v = (Get-Counter "\\GPU Process Memory(pid_$id*)\\Dedicated Usage" -ErrorAction SilentlyContinue).CounterSamples
-        if ($v) { $vramTotal += [int64](($v | Measure-Object CookedValue -Sum).Sum) }
+        $eng = @(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue)
+        foreach ($id in $pids) {
+          $needle = "pid_$($id)_"
+          $gpuTotal += (($eng | Where-Object { $_.Name -like "*$needle*" -and $_.Name -like "*engtype_3D*" } | Measure-Object UtilizationPercentage -Sum).Sum)
+        }
       } catch {}
     }
+
     [PSCustomObject]@{ Gpu = [math]::Round($gpuTotal, 1); Vram = $vramTotal } | ConvertTo-Json -Compress
   `
   const { stdout } = await execFileAsync(
@@ -367,8 +402,15 @@ function normalizeProcessName(name: string | undefined): string | undefined {
  */
 function extractFpsFromTitle(title: string): number | undefined {
   const m = title.match(/(\d+(?:\.\d+)?)\s*FPS/i) ?? title.match(/FPS[:\s|]+(\d+(?:\.\d+)?)/i)
-  if (!m) return undefined
-  const n = Number(m[1])
+  if (m) {
+    const n = Number(m[1])
+    return Number.isFinite(n) && n > 0 && n < 500 ? n : undefined
+  }
+  const ms = title.match(/(\d+(?:\.\d+)?)\s*ms/i)
+  if (!ms) return undefined
+  const frameMs = Number(ms[1])
+  if (!Number.isFinite(frameMs) || frameMs <= 0) return undefined
+  const n = 1000 / frameMs
   return Number.isFinite(n) && n > 0 && n < 500 ? n : undefined
 }
 

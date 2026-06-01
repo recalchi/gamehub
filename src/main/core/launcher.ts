@@ -213,6 +213,7 @@ async function discoverLikelyLaunchPids(launch: ActiveLaunchType): Promise<numbe
   const safeExeDir = launch.executablePath
     ? launch.executablePath.replace(/[\\/][^\\/]+$/, '').replace(/'/g, "''")
     : ''
+  const safeTitleHint = launch.gameTitle.trim().toLowerCase().replace(/'/g, "''")
   const safeProcessName = launch.processName?.replace(/'/g, "''") ?? ''
   const safeStartedAt = launch.startedAt.replace(/'/g, "''")
   const safePid = launch.pid ?? 0
@@ -220,9 +221,10 @@ async function discoverLikelyLaunchPids(launch: ActiveLaunchType): Promise<numbe
 $targetPid = ${safePid}
 $exePath = '${safeExePath}'
 $exeDir = '${safeExeDir}'
+$titleHint = '${safeTitleHint}'
 $procName = '${safeProcessName}'
 $startedAt = [datetime]'${safeStartedAt}'
-$cutoff = $startedAt.AddMinutes(-3)
+$cutoff = $startedAt.AddMinutes(-10)
 $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
 $hits = @()
 if ($targetPid -gt 0) {
@@ -245,6 +247,15 @@ if ($hits.Count -eq 0 -and $exeDir) {
     $_.ExecutablePath.ToLower().StartsWith($exeDir.ToLower()) -and
     ([Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate) -ge $cutoff)
   }
+}
+if ($hits.Count -eq 0 -and $titleHint) {
+  try {
+    $hits += @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.MainWindowTitle -and
+      $_.MainWindowTitle.ToLower().Contains($titleHint) -and
+      $_.StartTime -ge $cutoff
+    } | Select-Object @{Name='ProcessId';Expression={$_.Id}})
+  } catch {}
 }
 ($hits | Select-Object -ExpandProperty ProcessId -Unique) -join ','
 `
@@ -345,12 +356,12 @@ function markEnded(
   }
 }
 
-function recordPlaySession(game: Game, startedAt: number): number {
-  const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+function recordPlaySession(game: Game, startedAt: number, endedAt = Date.now()): number {
+  const seconds = Math.max(1, Math.round((endedAt - startedAt) / 1000))
   const current = libraryStore.load().games.find((g) => g.id === game.id)
   libraryStore.patchGame(game.id, {
     playTime: (current?.playTime ?? game.playTime ?? 0) + seconds,
-    lastPlayedAt: new Date().toISOString()
+    lastPlayedAt: new Date(endedAt).toISOString()
   })
   return seconds
 }
@@ -754,6 +765,50 @@ async function adoptNativeSuccessorPid(gameId: string, exitedPid: number | undef
   return false
 }
 
+/**
+ * If the bootstrap process exits before we can adopt a successor PID, keep
+ * polling for a while instead of ending the session immediately.
+ */
+async function watchDetachedNativeSession(
+  game: Game,
+  startedAt: number,
+  exitCode: number | null,
+  output: RingBuffer
+): Promise<void> {
+  const gameId = game.id
+  let misses = 0
+  let lastSeenAt = Date.now()
+  while (active.has(gameId)) {
+    const launch = active.get(gameId)
+    if (!launch) return
+    const candidates = await discoverLikelyLaunchPids(launch)
+    const nextPid = candidates.find((pid) => pid > 0)
+    if (nextPid) {
+      if (launch.pid !== nextPid) {
+        launch.pid = nextPid
+        log.info('launcher', `adopted late successor pid ${nextPid} for ${launch.gameTitle}`)
+      }
+      lastSeenAt = Date.now()
+      misses = 0
+      await delay(3500)
+      continue
+    }
+    misses += 1
+    if (misses >= 18) {
+      const endedAt = Math.max(lastSeenAt, startedAt + 1_000)
+      const seconds = recordPlaySession(game, startedAt, endedAt)
+      const tail = output.flush()
+      markEnded(gameId)
+      if (exitCode !== 0 && exitCode !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
+        if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
+        broadcastFailure(game, exitCode, seconds, 'Windows', tail)
+      }
+      return
+    }
+    await delay(3500)
+  }
+}
+
 async function launchNative(game: Game): Promise<LaunchResult> {
   if (!existsSync(game.path)) {
     return { ok: false, error: `Arquivo não encontrado: ${game.path}` }
@@ -786,17 +841,19 @@ async function launchNative(game: Game): Promise<LaunchResult> {
     child.on('exit', (code) => {
       void (async () => {
         const userStopped = forceStopping.delete(game.id)
-        if (!userStopped) {
-          const adopted = await adoptNativeSuccessorPid(game.id, child.pid)
-          if (adopted) return
+        if (userStopped) {
+          const seconds = recordPlaySession(game, startedAt)
+          const tail = output.flush()
+          markEnded(game.id)
+          if (code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
+            if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
+            broadcastFailure(game, code, seconds, 'Windows', tail)
+          }
+          return
         }
-        const seconds = recordPlaySession(game, startedAt)
-        const tail = output.flush()
-        markEnded(game.id)
-        if (!userStopped && code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
-          if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
-          broadcastFailure(game, code, seconds, 'Windows', tail)
-        }
+        const adopted = await adoptNativeSuccessorPid(game.id, child.pid)
+        if (adopted) return
+        void watchDetachedNativeSession(game, startedAt, code, output)
       })()
     })
     return { ok: true, pid: child.pid, command: game.path }

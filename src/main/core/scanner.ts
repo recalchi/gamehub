@@ -272,6 +272,14 @@ export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
   } catch (err) {
     log.warn('scanner', `steam playtime sync skipped: ${String(err)}`)
   }
+  try {
+    const matchedBySave = enrichPcPlaytimeFromSave(merged)
+    if (matchedBySave > 0) {
+      log.info('scanner', `save-based playtime synced into ${matchedBySave} game(s)`)
+    }
+  } catch (err) {
+    log.warn('scanner', `save-based playtime sync skipped: ${String(err)}`)
+  }
 
   libraryStore.save(merged, emulators)
   progress.phase = 'done'
@@ -780,6 +788,114 @@ function latestIso(a: string | undefined, b: string | undefined): string | undef
   if (!a) return b
   if (!b) return a
   return Date.parse(a) >= Date.parse(b) ? a : b
+}
+
+function enrichPcPlaytimeFromSave(games: Game[]): number {
+  let touched = 0
+  for (const game of games) {
+    if (game.platform !== 'pc') continue
+    const hint = hintPlaytimeFromPcSave(game)
+    if (!hint) continue
+    const prevPlay = game.playTime ?? 0
+    const nextPlay = Math.max(prevPlay, hint.playTimeSeconds)
+    const nextLast = latestIso(game.lastPlayedAt, hint.lastPlayedAt)
+    if (nextPlay === prevPlay && nextLast === game.lastPlayedAt) continue
+    game.playTime = nextPlay
+    game.lastPlayedAt = nextLast
+    const flags = new Set(game.flags ?? [])
+    flags.add(hint.flag)
+    game.flags = Array.from(flags)
+    touched += 1
+  }
+  return touched
+}
+
+function hintPlaytimeFromPcSave(
+  game: Game
+): { playTimeSeconds: number; lastPlayedAt?: string; flag: string } | null {
+  // Elden Ring keeps saves in %APPDATA%\\EldenRing\\<steamId>\\ER0000.sl2
+  if (isEldenRingGame(game)) {
+    const hint = eldenRingPlaytimeHint()
+    if (hint) return { ...hint, flag: 'save-playtime-eldenring' }
+  }
+  return null
+}
+
+function isEldenRingGame(game: Game): boolean {
+  const title = normalizeTitle(game.title)
+  const path = game.path.toLowerCase()
+  return (
+    title.includes('elden ring') ||
+    path.includes('\\eldenring\\') ||
+    path.includes('\\elden ring\\') ||
+    /\\game\\eldenring\.exe$/i.test(path)
+  )
+}
+
+function eldenRingPlaytimeHint(): { playTimeSeconds: number; lastPlayedAt?: string } | null {
+  const root = join(homedir(), 'AppData', 'Roaming', 'EldenRing')
+  if (!existsSync(root)) return null
+  let profileDirs: string[]
+  try {
+    profileDirs = readdirSync(root).filter((entry) => {
+      const full = join(root, entry)
+      try {
+        return statSync(full).isDirectory()
+      } catch {
+        return false
+      }
+    })
+  } catch {
+    return null
+  }
+
+  const stamps: Array<{ createdAtMs: number; modifiedAtMs: number }> = []
+  for (const dir of profileDirs) {
+    const full = join(root, dir)
+    let files: string[]
+    try {
+      files = readdirSync(full)
+    } catch {
+      continue
+    }
+    for (const file of files) {
+      if (!/^ER\d{4}\.(sl2|co2|mod)(\.bak)?$/i.test(file)) continue
+      try {
+        const st = statSync(join(full, file))
+        const createdAtMs = Number.isFinite(st.birthtimeMs) && st.birthtimeMs > 0
+          ? st.birthtimeMs
+          : st.ctimeMs
+        stamps.push({ createdAtMs, modifiedAtMs: st.mtimeMs })
+      } catch {
+        continue
+      }
+    }
+  }
+  if (stamps.length === 0) return null
+
+  const earliest = Math.min(...stamps.map((s) => s.createdAtMs))
+  const latest = Math.max(...stamps.map((s) => s.modifiedAtMs))
+  const estimatedHours = estimateHoursFromSaveTimeline(earliest, latest)
+  return {
+    playTimeSeconds: Math.max(0, Math.round(estimatedHours * 3600)),
+    lastPlayedAt: new Date(latest).toISOString()
+  }
+}
+
+function estimateHoursFromSaveTimeline(earliestMs: number, latestMs: number): number {
+  if (!Number.isFinite(earliestMs) || !Number.isFinite(latestMs) || latestMs <= 0) return 0
+  const spanMs = Math.max(0, latestMs - earliestMs)
+  // We don't have an official in-save hour counter available offline.
+  // This heuristic gives a conservative baseline from the save lifetime
+  // so users don't stay at 0h when they already have long-lived progress.
+  if (spanMs < 6 * 60 * 60 * 1000) return 2
+  const days = spanMs / (24 * 60 * 60 * 1000)
+  const estimated = 10 * Math.sqrt(Math.max(days, 1)) + days * 0.25
+  return clamp(estimated, 4, 1500)
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 /**

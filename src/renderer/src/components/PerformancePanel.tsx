@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import type { CrashStats, Game, PerformanceReport, PerformanceSample } from '@shared/types'
 
+const MSI_AFTERBURNER_DOWNLOAD_URL = 'https://us.msi.com/support/download/afterburner'
+
 interface SessionStats {
   fpsMin: number
   fpsAvg: number
@@ -175,7 +177,7 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
             icon={Activity}
             label="FPS"
             value={sample?.fps !== undefined ? `${sample.fps.toFixed(1)}` : '--'}
-            hint={sample?.fps !== undefined ? 'do título do emulador' : 'não exposto'}
+            hint={sample?.fps !== undefined ? 'RTSS/MSI ou titulo' : 'RTSS nao exposto'}
             tone={
               sample?.fps !== undefined
                 ? sample.fps < 30
@@ -213,6 +215,27 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
 
         {/* Session aggregates — live min/avg/max + peaks. Empty until enough
             samples have come in. */}
+        {game.platform === 'pc' && sample?.fps === undefined && (
+          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-sky-300/15 bg-sky-300/[0.06] p-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Monitor className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />
+              <div>
+                <div className="font-semibold text-slate-100">FPS via MSI Afterburner + RTSS</div>
+                <div className="mt-0.5 text-xs text-slate-400">
+                  Instale/abra o RTSS junto com o jogo para o GameHub ler FPS em tempo real.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.api.system.openExternal(MSI_AFTERBURNER_DOWNLOAD_URL)}
+              className="inline-flex items-center justify-center rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-white/15"
+            >
+              Baixar MSI Afterburner
+            </button>
+          </div>
+        )}
+
         {sessionStats.samples > 3 && (
           <div className="mt-4 rounded-lg border border-white/5 bg-white/[0.02] p-3">
             <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">

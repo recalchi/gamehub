@@ -21,6 +21,7 @@ interface ProcessSnapshot {
   gpuPercent?: number
   /** Dedicated VRAM bytes used by this PID. */
   gpuMemoryBytes?: number
+  fps?: number
   /** Best-effort window title from the main window — used to scrape FPS
    *  (PCSX2/RPCS3/DuckStation all write "FPS: nn.n" or similar in there). */
   windowTitle?: string
@@ -84,6 +85,7 @@ export function stopPerformanceMonitor(gameId: string, publishReport = true): Pe
   const state = sessions.get(gameId)
   sessions.delete(gameId)
   gpuCache.delete(gameId)
+  rtssCache.delete(gameId)
   sampleTick.delete(gameId)
   if (!state) return null
 
@@ -179,7 +181,7 @@ async function sampleSession(gameId: string): Promise<void> {
       systemMemoryUsedPercent: systemMemoryUsedPercent(),
       gpuPercent: snapshot.gpuPercent,
       gpuMemoryMb: bytesToMb(snapshot.gpuMemoryBytes),
-      fps: snapshot.windowTitle ? extractFpsFromTitle(snapshot.windowTitle) : undefined,
+      fps: snapshot.fps ?? (snapshot.windowTitle ? extractFpsFromTitle(snapshot.windowTitle) : undefined),
       responding: snapshot.responding,
       status: 'running'
     }
@@ -216,6 +218,8 @@ async function sampleSession(gameId: string): Promise<void> {
  */
 /** Per-game GPU sample cache. Refreshed less often than the main loop. */
 const gpuCache = new Map<string, { gpuPercent?: number; gpuMemoryBytes?: number; takenAtMs: number }>()
+/** Per-game RTSS FPS cache. PowerShell interop is slower than RAM/title reads. */
+const rtssCache = new Map<string, { fps?: number; takenAtMs: number }>()
 /** Sample-counter so we only re-query GPU every Nth basic sample. */
 const sampleTick = new Map<string, number>()
 
@@ -326,6 +330,15 @@ async function queryProcess(
     gpuStats = await queryGpu(parsed.Pids).catch(() => undefined) ?? gpuStats
     if (gpuStats) gpuCache.set(gameId, gpuStats)
   }
+  let rtssStats = rtssCache.get(gameId)
+  const rtssStaleMs = rtssStats?.fps === undefined ? 30_000 : 2_500
+  if (
+    parsed.Pids &&
+    (!rtssStats || Date.now() - rtssStats.takenAtMs >= rtssStaleMs || tick % 4 === 1)
+  ) {
+    rtssStats = await queryRtssFps(parsed.Pids).catch(() => undefined) ?? { takenAtMs: Date.now() }
+    rtssCache.set(gameId, rtssStats)
+  }
 
   return {
     pid: parsed.LeadPid ?? undefined,
@@ -336,7 +349,110 @@ async function queryProcess(
     responding: parsed.Responding ?? undefined,
     gpuPercent: gpuStats?.gpuPercent,
     gpuMemoryBytes: gpuStats?.gpuMemoryBytes,
+    fps: rtssStats?.fps,
     windowTitle: parsed.Title ?? undefined
+  }
+}
+
+async function queryRtssFps(pidsCsv: string): Promise<{ fps?: number; takenAtMs: number } | undefined> {
+  const safePids = pidsCsv
+    .split(',')
+    .map((pid) => pid.trim())
+    .filter((pid) => /^\d+$/.test(pid))
+    .join(',')
+  if (!safePids) return undefined
+
+  const command = `
+    $code = @'
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class GameHubRtssReader {
+  private const UInt32 FILE_MAP_READ = 0x0004;
+
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  private static extern IntPtr OpenFileMapping(UInt32 dwDesiredAccess, bool bInheritHandle, string lpName);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr MapViewOfFile(IntPtr hFileMappingObject, UInt32 dwDesiredAccess, UInt32 dwFileOffsetHigh, UInt32 dwFileOffsetLow, UIntPtr dwNumberOfBytesToMap);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool UnmapViewOfFile(IntPtr lpBaseAddress);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr hObject);
+
+  private static UInt32 ReadU32(IntPtr view, int offset) {
+    return unchecked((UInt32)Marshal.ReadInt32(view, offset));
+  }
+
+  public static string Read(string csv) {
+    var wanted = new HashSet<UInt32>();
+    foreach (var raw in csv.Split(',')) {
+      UInt32 pid;
+      if (UInt32.TryParse(raw.Trim(), out pid)) wanted.Add(pid);
+    }
+    if (wanted.Count == 0) return "{}";
+
+    IntPtr mapping = OpenFileMapping(FILE_MAP_READ, false, "RTSSSharedMemoryV2");
+    if (mapping == IntPtr.Zero) return "{}";
+    IntPtr view = IntPtr.Zero;
+    try {
+      view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, UIntPtr.Zero);
+      if (view == IntPtr.Zero) return "{}";
+
+      string signature = Encoding.ASCII.GetString(new byte[] {
+        Marshal.ReadByte(view, 0), Marshal.ReadByte(view, 1), Marshal.ReadByte(view, 2), Marshal.ReadByte(view, 3)
+      });
+      if (signature != "RTSS") return "{}";
+
+      UInt32 appEntrySize = ReadU32(view, 8);
+      UInt32 appArrOffset = ReadU32(view, 12);
+      UInt32 appArrSize = ReadU32(view, 16);
+      if (appEntrySize < 316 || appArrSize == 0) return "{}";
+
+      for (UInt32 i = 0; i < appArrSize; i++) {
+        int offset = checked((int)(appArrOffset + (i * appEntrySize)));
+        UInt32 processId = ReadU32(view, offset);
+        if (!wanted.Contains(processId)) continue;
+
+        UInt32 time0 = ReadU32(view, offset + 268);
+        UInt32 time1 = ReadU32(view, offset + 272);
+        UInt32 frames = ReadU32(view, offset + 276);
+        UInt32 avg = ReadU32(view, offset + 308);
+
+        double fps = 0;
+        if (avg > 0 && avg < 1000) fps = avg;
+        else if (time1 > time0 && frames > 0) fps = frames * 1000.0 / (time1 - time0);
+        if (fps > 0 && fps < 1000) {
+          return "{\\"Fps\\":" + fps.ToString("0.###", CultureInfo.InvariantCulture) + "}";
+        }
+      }
+      return "{}";
+    } finally {
+      if (view != IntPtr.Zero) UnmapViewOfFile(view);
+      CloseHandle(mapping);
+    }
+  }
+}
+'@
+    Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+    [GameHubRtssReader]::Read('${safePids}')
+  `
+
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    { timeout: 2500, windowsHide: true }
+  )
+  const parsed = JSON.parse(stdout.trim() || '{}') as { Fps?: number | null }
+  const fps = parsed.Fps
+  return {
+    fps: typeof fps === 'number' && Number.isFinite(fps) && fps > 0 && fps < 1000 ? fps : undefined,
+    takenAtMs: Date.now()
   }
 }
 

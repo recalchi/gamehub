@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { CrashStats, Game, PerformanceReport, PerformanceSample } from '@shared/types'
 
-const MSI_AFTERBURNER_DOWNLOAD_URL = 'https://us.msi.com/support/download/afterburner'
+const MSI_AFTERBURNER_DOWNLOAD_URL = 'https://us.msi.com/Landing/afterburner/graphics-cards'
 
 interface SessionStats {
   fpsMin: number

@@ -343,6 +343,9 @@ async function queryProcess(
 async function queryGpu(
   pidsCsv: string
 ): Promise<{ gpuPercent?: number; gpuMemoryBytes?: number; takenAtMs: number } | undefined> {
+  const nvidia = await queryGpuNvidiaSmi(pidsCsv).catch(() => undefined)
+  if (nvidia?.gpuPercent !== undefined) return nvidia
+
   const command = `
     $pids = @('${pidsCsv}'.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\\d+$' })
     $gpuTotal = 0.0
@@ -379,12 +382,52 @@ async function queryGpu(
   const { stdout } = await execFileAsync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-    { timeout: 4000, windowsHide: true }
+    { timeout: 12_000, windowsHide: true }
   )
   const parsed = JSON.parse(stdout.trim()) as { Gpu?: number | null; Vram?: number | null }
   return {
     gpuPercent: parsed.Gpu == null ? undefined : Math.min(100, Math.max(0, parsed.Gpu)),
     gpuMemoryBytes: parsed.Vram ?? undefined,
+    takenAtMs: Date.now()
+  }
+}
+
+async function queryGpuNvidiaSmi(
+  pidsCsv: string
+): Promise<{ gpuPercent?: number; gpuMemoryBytes?: number; takenAtMs: number } | undefined> {
+  const pids = new Set(
+    pidsCsv
+      .split(',')
+      .map((raw) => raw.trim())
+      .filter((raw) => /^\d+$/.test(raw))
+  )
+  if (pids.size === 0) return undefined
+
+  const [gpu, apps] = await Promise.all([
+    execFileAsync(
+      'nvidia-smi',
+      ['--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits'],
+      { timeout: 2000, windowsHide: true }
+    ),
+    execFileAsync(
+      'nvidia-smi',
+      ['--query-compute-apps=pid,used_gpu_memory', '--format=csv,noheader,nounits'],
+      { timeout: 2000, windowsHide: true }
+    ).catch(() => ({ stdout: '' }))
+  ])
+
+  const hasTargetPid = apps.stdout
+    .split(/\r?\n/)
+    .some((line) => pids.has(line.split(',')[0]?.trim()))
+  if (!hasTargetPid) return undefined
+
+  const firstGpu = gpu.stdout.trim().split(/\r?\n/)[0]
+  const [rawGpu, rawMemory] = firstGpu.split(',').map((part) => Number(part.trim()))
+  if (!Number.isFinite(rawGpu)) return undefined
+
+  return {
+    gpuPercent: Math.min(100, Math.max(0, rawGpu)),
+    gpuMemoryBytes: Number.isFinite(rawMemory) ? rawMemory * 1024 * 1024 : undefined,
     takenAtMs: Date.now()
   }
 }

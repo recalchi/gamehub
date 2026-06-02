@@ -54,6 +54,8 @@ export const IPC = {
   performance: {
     /** ipc: returns the most recent sample for a game, if a monitor is running */
     latest: 'performance:latest',
+    /** ipc: starts monitoring a native game that is already running */
+    attach: 'performance:attach',
     /** ipc: returns the most recent finished session report for a game */
     report: 'performance:report',
     /** broadcast: PerformanceSample while a game is running */

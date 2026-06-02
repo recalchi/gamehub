@@ -40,11 +40,27 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
   const [report, setReport] = useState<PerformanceReport | null>(null)
   const [sessionStats, setSessionStats] = useState<SessionStats>(EMPTY_STATS)
   const [crashStats, setCrashStats] = useState<CrashStats | null>(null)
+  const [attachState, setAttachState] = useState<'idle' | 'checking' | 'attached' | 'not-found'>('idle')
   // FPS rolling sum kept outside React state to avoid render churn each tick.
   const fpsSumRef = useRef({ sum: 0, count: 0 })
+  const attachAttemptedRef = useRef(false)
+
+  async function attachRunningGame(): Promise<void> {
+    if (game.platform !== 'pc' || attachState === 'checking') return
+    setAttachState('checking')
+    const attached = await window.api.performance.attach(game.id)
+    if (attached) {
+      setSample(attached)
+      setAttachState('attached')
+    } else {
+      setAttachState('not-found')
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
+    attachAttemptedRef.current = false
+    setAttachState('idle')
     void Promise.all([
       window.api.performance.latest(game.id),
       window.api.performance.report(game.id)
@@ -52,6 +68,10 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
       if (cancelled) return
       setSample(latest)
       setReport(latestReport)
+      if (game.platform === 'pc' && latest?.status !== 'running' && !attachAttemptedRef.current) {
+        attachAttemptedRef.current = true
+        void attachRunningGame()
+      }
     })
 
     const offSample = window.api.performance.onSample((next) => {
@@ -233,6 +253,16 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
             >
               Baixar MSI Afterburner
             </button>
+            {!live && (
+              <button
+                type="button"
+                onClick={() => void attachRunningGame()}
+                disabled={attachState === 'checking'}
+                className="inline-flex items-center justify-center rounded-md bg-sky-300/20 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/25 disabled:cursor-wait disabled:opacity-60"
+              >
+                {attachState === 'checking' ? 'Procurando...' : 'Reconectar monitor'}
+              </button>
+            )}
           </div>
         )}
 

@@ -50,7 +50,7 @@ import { runHealthCheck, cleanOrphans } from '@main/core/health'
 import { startDownload, cancelDownload, type StartDownloadInput } from '@main/core/downloads'
 import { canAutoInstall, installEmulator } from '@main/core/autoInstall'
 import { collectControllerDiagnostics } from '@main/core/controllers'
-import { latestPerformanceReport, latestPerformanceSample } from '@main/core/performance'
+import { attachPerformanceMonitor, latestPerformanceReport, latestPerformanceSample } from '@main/core/performance'
 import { discordRpcStatus, discordRpcValidate } from '@main/core/discordRpc'
 import { listInstalledMods, listModCatalog, startModDownload } from '@main/core/modCatalog'
 import { achievementDetail, listAchievementSummaries } from '@main/core/achievements'
@@ -527,6 +527,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.performance.latest, (_e, gameId: string) =>
     latestPerformanceSample(gameId)
   )
+
+  ipcMain.handle(IPC.performance.attach, (_e, gameId: string) => {
+    const data = libraryStore.load()
+    const game = data.games.find((g) => g.id === gameId)
+    if (!game) return null
+    return attachPerformanceMonitor(game)
+  })
 
   ipcMain.handle(IPC.performance.report, (_e, gameId: string) =>
     latestPerformanceReport(gameId)

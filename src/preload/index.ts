@@ -115,6 +115,7 @@ export interface GameHubApi {
   }
   performance: {
     latest: (gameId: string) => Promise<PerformanceSample | null>
+    attach: (gameId: string) => Promise<PerformanceSample | null>
     report: (gameId: string) => Promise<PerformanceReport | null>
     onSample: (cb: (sample: PerformanceSample) => void) => () => void
     onReport: (cb: (report: PerformanceReport) => void) => () => void
@@ -301,6 +302,7 @@ const api: GameHubApi = {
   },
   performance: {
     latest: (gameId) => ipcRenderer.invoke(IPC.performance.latest, gameId),
+    attach: (gameId) => ipcRenderer.invoke(IPC.performance.attach, gameId),
     report: (gameId) => ipcRenderer.invoke(IPC.performance.report, gameId),
     onSample: (cb) => {
       const listener = (_e: unknown, sample: PerformanceSample): void => cb(sample)

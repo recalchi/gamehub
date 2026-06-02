@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
 import { cpus, freemem, totalmem } from 'node:os'
-import { dirname } from 'node:path'
+import { basename, dirname } from 'node:path'
 import { promisify } from 'node:util'
 import { BrowserWindow } from 'electron'
 import { settingsStore } from './store'
 import { log } from './logger'
 import { IPC } from '@shared/ipc'
-import type { ActiveLaunch, PerformanceReport, PerformanceSample } from '@shared/types'
+import type { ActiveLaunch, Game, PerformanceReport, PerformanceSample } from '@shared/types'
 
 const execFileAsync = promisify(execFile)
 
@@ -117,6 +117,34 @@ export function latestPerformanceSample(gameId: string): PerformanceSample | nul
 
 export function latestPerformanceReport(gameId: string): PerformanceReport | null {
   return reports.get(gameId) ?? null
+}
+
+export async function attachPerformanceMonitor(game: Game): Promise<PerformanceSample | null> {
+  if (process.platform !== 'win32' || game.platform !== 'pc') return null
+  const processName = normalizeProcessName(basename(game.path))
+  const startedAt = new Date().toISOString()
+  const snapshot = await queryProcess(
+    undefined,
+    processName,
+    game.path,
+    game.title,
+    startedAt,
+    game.id
+  )
+  if (!snapshot?.pid) return null
+
+  const launch: ActiveLaunch = {
+    gameId: game.id,
+    gameTitle: game.title,
+    emulatorName: 'Windows',
+    pid: snapshot.pid,
+    processName: normalizeProcessName(snapshot.name) ?? processName,
+    executablePath: game.path,
+    startedAt
+  }
+  startPerformanceMonitor(launch)
+  await sampleSession(game.id)
+  return latestPerformanceSample(game.id)
 }
 
 async function sampleSession(gameId: string): Promise<void> {
@@ -307,7 +335,7 @@ async function queryProcess(
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-      { timeout: 3000, windowsHide: true }
+      { timeout: 15_000, windowsHide: true }
     )
     parsed = JSON.parse(stdout.trim())
   } catch (err) {

@@ -33,6 +33,7 @@ export const PATHS = {
   cache: ensure(join(userData, 'cache')),
   settingsFile: join(userData, 'settings.json'),
   libraryFile: join(userData, 'library.json'),
+  gameJourneyFile: join(userData, 'game-journey.json'),
   mediaLibraryFile: join(userData, 'media-library.json'),
   mediaWatchedFile: join(userData, 'media-watched.json'),
   modInstallsFile: join(userData, 'mod-installs.json')

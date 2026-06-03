@@ -119,18 +119,30 @@ export function latestPerformanceReport(gameId: string): PerformanceReport | nul
   return reports.get(gameId) ?? null
 }
 
-export async function attachPerformanceMonitor(game: Game): Promise<PerformanceSample | null> {
+export async function attachPerformanceMonitor(
+  game: Game,
+  activeLaunch?: ActiveLaunch
+): Promise<PerformanceSample | null> {
   if (process.platform !== 'win32' || game.platform !== 'pc') return null
   const processName = normalizeProcessName(basename(game.path))
-  const startedAt = new Date().toISOString()
-  const snapshot = await queryProcess(
-    undefined,
-    processName,
-    game.path,
-    game.title,
-    startedAt,
-    game.id
-  )
+  const startedAt = activeLaunch?.startedAt ?? new Date().toISOString()
+  const snapshot = activeLaunch?.pid
+    ? await queryProcess(
+        activeLaunch.pid,
+        activeLaunch.processName ?? processName,
+        activeLaunch.executablePath ?? game.path,
+        activeLaunch.gameTitle || game.title,
+        startedAt,
+        game.id
+      )
+    : await queryProcess(
+        undefined,
+        processName,
+        game.path,
+        game.title,
+        startedAt,
+        game.id
+      )
   if (!snapshot?.pid) return null
 
   const launch: ActiveLaunch = {
@@ -138,7 +150,7 @@ export async function attachPerformanceMonitor(game: Game): Promise<PerformanceS
     gameTitle: game.title,
     emulatorName: 'Windows',
     pid: snapshot.pid,
-    processName: normalizeProcessName(snapshot.name) ?? processName,
+    processName: normalizeProcessName(snapshot.name) ?? activeLaunch?.processName ?? processName,
     executablePath: game.path,
     startedAt
   }

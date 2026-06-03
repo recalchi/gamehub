@@ -27,6 +27,7 @@ import {
   installDownloadedUpdate
 } from '@main/core/updater'
 import { applyBackup, exportBackup, previewBackup } from '@main/core/backup'
+import { archiveAndRemoveGame, listJourneyRecords, upsertJourneyRecord } from '@main/core/journey'
 import { addManualGame, importSteamGames, removeGame, type ManualGameInput } from '@main/core/manualGames'
 import { importEpicGames } from '@main/core/epic'
 import {
@@ -65,7 +66,16 @@ import {
   restoreSave
 } from '@main/core/saves'
 import { IPC } from '@shared/ipc'
-import type { AppSettings, DisplayTarget, EmulatorId, Game, GameStatus, ModDownloadInput, PlatformId } from '@shared/types'
+import type {
+  AppSettings,
+  DisplayTarget,
+  EmulatorId,
+  Game,
+  GameJourneyInput,
+  GameStatus,
+  ModDownloadInput,
+  PlatformId
+} from '@shared/types'
 import { existsSync } from 'node:fs'
 import { listDisplays, moveMainWindowToDisplay } from '@main/core/windowing'
 
@@ -269,6 +279,10 @@ export function registerIpcHandlers(): void {
     log.info('ipc', `library.remove ${id}`)
     return removeGame(id)
   })
+
+  ipcMain.handle(IPC.library.archiveRemove, (_e, input: GameJourneyInput) =>
+    archiveAndRemoveGame(input)
+  )
 
   ipcMain.handle(IPC.system.importSteam, async () => {
     log.info('ipc', 'system.importSteam')
@@ -532,7 +546,8 @@ export function registerIpcHandlers(): void {
     const data = libraryStore.load()
     const game = data.games.find((g) => g.id === gameId)
     if (!game) return null
-    return attachPerformanceMonitor(game)
+    const activeLaunch = listActiveLaunches().find((launch) => launch.gameId === gameId)
+    return attachPerformanceMonitor(game, activeLaunch)
   })
 
   ipcMain.handle(IPC.performance.report, (_e, gameId: string) =>
@@ -544,6 +559,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.achievements.summaries, () => listAchievementSummaries())
   ipcMain.handle(IPC.achievements.game, (_e, gameId: string) => achievementDetail(gameId))
+
+  ipcMain.handle(IPC.journey.list, () => listJourneyRecords())
+  ipcMain.handle(IPC.journey.upsert, (_e, input: GameJourneyInput) => upsertJourneyRecord(input))
 
   // ----- Saves -----
   ipcMain.handle(IPC.saves.location, (_e, gameId: string) => describeSaveLocation(gameId))

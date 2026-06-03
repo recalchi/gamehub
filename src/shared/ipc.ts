@@ -14,6 +14,7 @@ export const IPC = {
     coverUpdated: 'library:cover-updated',
     addManual: 'library:add-manual',
     remove: 'library:remove',
+    archiveRemove: 'library:archive-remove',
     healthCheck: 'library:health-check',
     cleanOrphans: 'library:clean-orphans',
     /** ipc: extract a compressed-archive game in-place and update its path */
@@ -72,6 +73,10 @@ export const IPC = {
   achievements: {
     summaries: 'achievements:summaries',
     game: 'achievements:game'
+  },
+  journey: {
+    list: 'journey:list',
+    upsert: 'journey:upsert'
   },
   saves: {
     location: 'saves:location',

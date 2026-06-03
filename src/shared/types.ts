@@ -718,6 +718,27 @@ export interface LaunchTerminateResult {
   error?: string
 }
 
+export type GameCompletionStatus = 'played' | 'completed' | 'platinum'
+
+export interface GameJourneyInput {
+  gameId: string
+  status: GameCompletionStatus
+  redownloadUrl?: string
+  sourceLabel?: string
+  sourceUrl?: string
+  captureSave?: boolean
+}
+
+export interface GameJourneyRecord extends GameJourneyInput {
+  title: string
+  gamePath: string
+  cover?: string
+  banner?: string
+  savedAt: string
+  saveSnapshotId?: string
+  saveWarning?: string
+}
+
 export interface DownloadProgress {
   id: string
   url: string

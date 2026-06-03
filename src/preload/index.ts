@@ -21,6 +21,8 @@ import type {
   EmulatorId,
   Game,
   HealthReport,
+  GameJourneyInput,
+  GameJourneyRecord,
   LaunchFailedEvent,
   LaunchFallbackEvent,
   LaunchResult,
@@ -74,6 +76,9 @@ export interface GameHubApi {
       cover?: string
     }) => Promise<Game | { error: string }>
     remove: (id: string) => Promise<{ ok: true } | { error: string }>
+    archiveRemove: (
+      input: GameJourneyInput
+    ) => Promise<{ ok: true; record: GameJourneyRecord } | { error: string }>
     healthCheck: () => Promise<HealthReport>
     cleanOrphans: () => Promise<{ removed: number; bytes: number }>
     extractArchive: (
@@ -127,6 +132,10 @@ export interface GameHubApi {
   achievements: {
     summaries: () => Promise<GameAchievementSummary[]>
     game: (gameId: string) => Promise<GameAchievementDetail | null>
+  }
+  journey: {
+    list: () => Promise<GameJourneyRecord[]>
+    upsert: (input: GameJourneyInput) => Promise<GameJourneyRecord | { error: string }>
   }
   saves: {
     location: (gameId: string) => Promise<{ available: boolean; path?: string; label?: string }>
@@ -241,6 +250,7 @@ const api: GameHubApi = {
       ipcRenderer.invoke(IPC.library.setManualCover, id, sourcePath),
     addManual: (input) => ipcRenderer.invoke(IPC.library.addManual, input),
     remove: (id) => ipcRenderer.invoke(IPC.library.remove, id),
+    archiveRemove: (input) => ipcRenderer.invoke(IPC.library.archiveRemove, input),
     healthCheck: () => ipcRenderer.invoke(IPC.library.healthCheck),
     cleanOrphans: () => ipcRenderer.invoke(IPC.library.cleanOrphans),
     extractArchive: (gameId) => ipcRenderer.invoke(IPC.library.extractArchive, gameId),
@@ -322,6 +332,10 @@ const api: GameHubApi = {
   achievements: {
     summaries: () => ipcRenderer.invoke(IPC.achievements.summaries),
     game: (gameId) => ipcRenderer.invoke(IPC.achievements.game, gameId)
+  },
+  journey: {
+    list: () => ipcRenderer.invoke(IPC.journey.list),
+    upsert: (input) => ipcRenderer.invoke(IPC.journey.upsert, input)
   },
   saves: {
     location: (gameId) => ipcRenderer.invoke(IPC.saves.location, gameId),

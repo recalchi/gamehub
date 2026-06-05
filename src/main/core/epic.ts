@@ -23,11 +23,15 @@ interface EpicImportResult {
 }
 
 const EPIC_MANIFEST_DIRS = [
-  'C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests'
+  'C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests',
+  'D:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests',
+  'E:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests'
 ]
 
-const EPIC_LAUNCHER_INSTALLED =
-  'C:\\ProgramData\\Epic\\UnrealEngineLauncher\\LauncherInstalled.dat'
+const EPIC_LAUNCHER_INSTALLED_CANDIDATES = [
+  'C:\\ProgramData\\Epic\\UnrealEngineLauncher\\LauncherInstalled.dat',
+  'C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\LauncherInstalled.dat'
+]
 
 export function detectEpicGames(): EpicInstalledGame[] {
   const byKey = new Map<string, EpicInstalledGame>()
@@ -137,7 +141,11 @@ function detectFromManifestDir(dir: string): EpicInstalledGame[] {
 }
 
 function detectFromLauncherInstalled(): EpicInstalledGame[] {
-  const root = readJsonRecord(EPIC_LAUNCHER_INSTALLED)
+  let root: Record<string, unknown> | null = null
+  for (const candidate of EPIC_LAUNCHER_INSTALLED_CANDIDATES) {
+    root = readJsonRecord(candidate)
+    if (root) break
+  }
   const list = Array.isArray(root?.InstallationList) ? root.InstallationList : []
   const games: EpicInstalledGame[] = []
   for (const entry of list) {

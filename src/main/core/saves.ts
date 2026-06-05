@@ -4,6 +4,12 @@ import { homedir } from 'node:os'
 import { PATHS } from './paths'
 import { libraryStore } from './store'
 import { log } from './logger'
+import {
+  PC_SAVE_CATALOG,
+  PC_FALLBACK_ROOTS,
+  normalizeTitle,
+  expandPath
+} from './save-catalog/pc'
 import type { EmulatorId, Game, SaveSnapshot } from '@shared/types'
 
 /**
@@ -48,6 +54,23 @@ interface SaveLocation {
  * entire memcard.
  */
 function resolveSaveLocation(game: Game, emulatorInstallPath?: string): SaveLocation | null {
+  // PC standalone games: look up known save-path catalog, then fuzzy fallback.
+  // Steam/Epic/Riot entries are intentionally skipped here — store integrations
+  // handle their saves; mixing would conflate two unrelated install footprints.
+  if (game.platform === 'pc') {
+    if (
+      game.path.startsWith('steam://') ||
+      game.path.startsWith('epic://') ||
+      game.path.startsWith('riot://') ||
+      game.flags?.includes('steam') ||
+      game.flags?.includes('epic') ||
+      game.flags?.includes('riot')
+    ) {
+      return null
+    }
+    return resolvePcSaveLocation(game)
+  }
+
   if (!game.emulator || !emulatorInstallPath) return null
 
   const candidates: Partial<Record<EmulatorId, string[]>> = {
@@ -86,6 +109,57 @@ function resolveSaveLocation(game: Game, emulatorInstallPath?: string): SaveLoca
     }
   }
   return null
+}
+
+/**
+ * Look up PC save location. First try the static catalog (exact normalized
+ * title match), then walk a few common roots looking for a folder whose name
+ * loosely matches the title.
+ */
+function resolvePcSaveLocation(game: Game): SaveLocation | null {
+  const slug = normalizeTitle(game.title)
+  const exact = PC_SAVE_CATALOG[slug]
+  if (exact) {
+    for (const tmpl of exact) {
+      const full = expandPath(tmpl)
+      if (full && existsSync(full)) {
+        return { path: full, label: shortenLabel(full) }
+      }
+    }
+  }
+  // Fuzzy fallback: scan well-known roots for a directory whose normalized
+  // name matches the game's slug. Cheap because we only look one level deep.
+  const fuzzyTarget = slug.replace(/\s+/g, '')
+  for (const rootTmpl of PC_FALLBACK_ROOTS) {
+    const root = expandPath(rootTmpl)
+    if (!root || !existsSync(root)) continue
+    let entries: string[]
+    try {
+      entries = readdirSync(root)
+    } catch {
+      continue
+    }
+    for (const name of entries) {
+      const candidate = normalizeTitle(name).replace(/\s+/g, '')
+      if (!candidate) continue
+      if (candidate === fuzzyTarget || candidate.includes(fuzzyTarget) || fuzzyTarget.includes(candidate)) {
+        const full = join(root, name)
+        try {
+          if (statSync(full).isDirectory()) {
+            return { path: full, label: shortenLabel(full) }
+          }
+        } catch {
+          // ignore unreadable entries
+        }
+      }
+    }
+  }
+  return null
+}
+
+function shortenLabel(full: string): string {
+  const parts = full.replace(/\//g, '\\').split('\\')
+  return parts.slice(-2).join('/')
 }
 
 /** Recursively copy a directory tree. */

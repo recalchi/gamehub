@@ -38,6 +38,7 @@ import MetadataEditor from '../components/MetadataEditor'
 import TagEditor from '../components/TagEditor'
 import GameBackdrop from '../components/GameBackdrop'
 import PerformancePanel from '../components/PerformancePanel'
+import LocalConfigPanel from '../components/LocalConfigPanel'
 
 export default function GameDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -287,7 +288,11 @@ export default function GameDetail(): JSX.Element {
               {tab === 'setup' && (
                 <div className="space-y-3">
                   <EmulatorPicker game={game} onChanged={() => void reload()} />
-                  <BiosPanel emulatorId={game.emulator} onBiosInstalled={() => void reload()} />
+                  {game.platform === 'pc' || game.emulator === 'native' ? (
+                    <LocalConfigPanel game={game} />
+                  ) : (
+                    <BiosPanel emulatorId={game.emulator} onBiosInstalled={() => void reload()} />
+                  )}
                   <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400 flex items-center gap-2">
                     <SettingsIcon className="w-3.5 h-3.5 text-slate-500" />
                     Atalhos:
@@ -303,7 +308,7 @@ export default function GameDetail(): JSX.Element {
                   <CrashHistoryPanel gameId={game.id} />
                 </div>
               )}
-              {tab === 'achievements' && <AchievementsPanel detail={achievements} />}
+              {tab === 'achievements' && <AchievementsPanel detail={achievements} gameId={game.id} />}
               {tab === 'journey' && (
                 <JourneyTrackerPanel
                   game={game}
@@ -409,7 +414,25 @@ function GameDetailBackdrop({
   return <GameBackdrop game={game} preset={preset} />
 }
 
-function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null }): JSX.Element {
+function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail | null; gameId: string }): JSX.Element {
+  const [unlocked, setUnlocked] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    let alive = true
+    void window.api.achievements.progress(gameId).then((data) => {
+      if (alive) setUnlocked(data)
+    })
+    return () => {
+      alive = false
+    }
+  }, [gameId])
+
+  async function toggle(achievementId: string): Promise<void> {
+    const isUnlocked = !!unlocked[achievementId]
+    const next = await window.api.achievements.toggle(gameId, achievementId, !isUnlocked)
+    setUnlocked(next)
+  }
+
   if (!detail) {
     return (
       <section id="achievements" className="mt-4 glass rounded-lg p-4 text-sm text-slate-400">
@@ -419,7 +442,8 @@ function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null })
   }
 
   const ready = detail.summary.status === 'ready'
-  const preview = detail.achievements.slice(0, 6)
+  const unlockedCount = Object.keys(unlocked).length
+  const total = detail.achievements.length
 
   return (
     <section id="achievements" className="mt-4 glass rounded-lg p-4">
@@ -443,7 +467,7 @@ function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null })
           {detail.summary.sourceLabel}
         </span>
         <span className="rounded bg-white/5 px-2 py-1 text-slate-300">
-          {detail.summary.total > 0 ? `${detail.summary.total} identificadas` : 'Sem lista local'}
+          {total > 0 ? `${unlockedCount} / ${total}` : 'Sem lista local'}
         </span>
         {detail.summary.sourceUrl && (
           <button
@@ -456,33 +480,66 @@ function AchievementsPanel({ detail }: { detail: GameAchievementDetail | null })
         )}
       </div>
 
+      {total > 0 && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
+          <div
+            className="h-full bg-emerald-400 transition-all"
+            style={{ width: `${total ? Math.round((unlockedCount / total) * 100) : 0}%` }}
+          />
+        </div>
+      )}
+
       {ready ? (
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-          {preview.map((achievement) => (
-            <div key={achievement.id} className="flex gap-3 rounded-lg bg-white/[0.04] p-2">
-              <div className="h-11 w-11 shrink-0 overflow-hidden rounded bg-white/5">
-                {achievement.icon ? (
-                  <img
-                    src={achievement.icon}
-                    alt={achievement.title}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="h-full w-full flex items-center justify-center text-slate-500">
-                    <Award className="w-5 h-5" />
+          {detail.achievements.map((achievement) => {
+            const done = !!unlocked[achievement.id]
+            return (
+              <button
+                type="button"
+                key={achievement.id}
+                onClick={() => void toggle(achievement.id)}
+                className={`flex gap-3 rounded-lg p-2 text-left transition ${
+                  done
+                    ? 'border border-emerald-400/40 bg-emerald-400/10'
+                    : 'border border-white/5 bg-white/[0.04] hover:bg-white/[0.07]'
+                }`}
+              >
+                <div className="h-11 w-11 shrink-0 overflow-hidden rounded bg-white/5 relative">
+                  {achievement.icon ? (
+                    <img
+                      src={achievement.icon}
+                      alt={achievement.title}
+                      className={`h-full w-full object-cover ${done ? '' : 'grayscale opacity-60'}`}
+                    />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center text-slate-500">
+                      <Award className="w-5 h-5" />
+                    </div>
+                  )}
+                  {done && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-emerald-500/30">
+                      <Check className="w-5 h-5 text-emerald-100" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={`text-sm font-semibold truncate ${done ? 'text-emerald-200' : ''}`}>
+                    {achievement.title}
                   </div>
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{achievement.title}</div>
-                {achievement.description && (
-                  <div className="text-[11px] text-slate-500 line-clamp-2">
-                    {achievement.description}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+                  {achievement.description && (
+                    <div className="text-[11px] text-slate-500 line-clamp-2">
+                      {achievement.description}
+                    </div>
+                  )}
+                  {done && unlocked[achievement.id] && (
+                    <div className="mt-0.5 text-[10px] text-emerald-300/80">
+                      Marcada {new Date(unlocked[achievement.id]).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              </button>
+            )
+          })}
         </div>
       ) : (
         <p className="mt-3 text-sm text-slate-500">
@@ -594,7 +651,7 @@ function JourneyTrackerPanel({
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as GameCompletionStatus)}
-            className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none focus:border-accent"
+            className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none focus:border-accent [&>option]:bg-slate-900 [&>option]:text-white"
           >
             <option value="played">Jogado</option>
             <option value="completed">Zerado</option>

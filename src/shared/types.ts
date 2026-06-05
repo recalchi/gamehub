@@ -280,6 +280,46 @@ export interface PerformanceReport {
   health: 'good' | 'attention' | 'unknown'
 }
 
+export interface RtssStatus {
+  installed: boolean
+  running: boolean
+  installPath?: string
+  diagnostic: {
+    helperBuilt: boolean
+    helperPath: string
+    lastProbeAt?: string
+    lastProbeError?: string
+    lastEntryCount: number
+    helperBuildError?: string
+    shmStatus?: string
+    shmDetail?: string
+  }
+}
+
+export type RtssEnsureResult =
+  | 'already-running'
+  | 'started'
+  | 'not-installed'
+  | 'spawn-failed'
+
+export interface PerfSessionSummary {
+  sessionId: string
+  startedAt: string
+  endedAt?: string
+  durationSeconds: number
+  fpsAvg?: number
+  fpsMin?: number
+  fpsMax?: number
+  cpuPeak?: number
+  gpuPeak?: number
+  ramPeakMb?: number
+  sampleCount: number
+}
+
+export interface PerfSessionDetail extends PerfSessionSummary {
+  samples: PerformanceSample[]
+}
+
 export interface SteamGridDbSettings {
   /** SteamGridDB API key (Bearer token). Empty = integration off. */
   apiKey: string
@@ -307,7 +347,7 @@ export interface DiscordRpcStatus {
   lastHandshake: 'ok' | 'invalid-client-id' | 'discord-not-running' | 'disabled' | 'unknown'
 }
 
-export type AchievementProvider = 'steam-local' | 'retroachievements' | 'none'
+export type AchievementProvider = 'steam-local' | 'retroachievements' | 'local-catalog' | 'none'
 
 export type AchievementSourceStatus =
   | 'ready'
@@ -345,6 +385,57 @@ export interface GameAchievementSummary {
 export interface GameAchievementDetail {
   summary: GameAchievementSummary
   achievements: AchievementDefinition[]
+}
+
+export type GameCompletionStatus = 'played' | 'completed' | 'platinum'
+
+export interface GameJourneyRecord {
+  id: string
+  gameId: string
+  title: string
+  platform: PlatformId
+  emulator?: EmulatorId
+  gamePath?: string
+  cover?: string
+  banner?: string
+  status: GameCompletionStatus
+  playTimeSeconds: number
+  firstTrackedAt: string
+  lastTrackedAt: string
+  completedAt?: string
+  redownloadUrl?: string
+  sourceUrl?: string
+  sourceLabel?: string
+  saveSnapshotId?: string
+  saveSnapshotCreatedAt?: string
+  saveSnapshotSizeBytes?: number
+  achievementProvider?: AchievementProvider
+  achievementUnlocked?: number
+  achievementTotal?: number
+  notes?: string
+}
+
+export interface GameJourneyFile {
+  records: GameJourneyRecord[]
+  updatedAt: string
+}
+
+export interface GameJourneyUpsertInput {
+  gameId: string
+  status: GameCompletionStatus
+  redownloadUrl?: string
+  sourceUrl?: string
+  sourceLabel?: string
+  captureSave?: boolean
+  notes?: string
+}
+
+export interface GameArchiveRemoveInput extends GameJourneyUpsertInput {
+  /**
+   * Optional safety toggle so the same endpoint can be reused by future UI
+   * flows where the user only wants to archive progress and keep the game.
+   */
+  removeFromLibrary?: boolean
 }
 
 export interface GameLaunchSettings {
@@ -440,7 +531,12 @@ export interface MediaSettings {
 
 export type MediaKind = 'movie' | 'series' | 'episode' | 'documentary'
 
-export type MediaStreamingProviderId = 'prime-video'
+/**
+ * Identifier for a streaming integration. Kept as `string` so new providers
+ * (netflix, disney-plus, max, etc.) can plug into the registry without
+ * touching the type system. Built-in IDs use the kebab-case slug.
+ */
+export type MediaStreamingProviderId = string
 
 export interface MediaStreamingProvider {
   id: MediaStreamingProviderId
@@ -449,7 +545,25 @@ export interface MediaStreamingProvider {
   baseUrl: string
   searchUrl: string
   activationUrl: string
-  openMode: 'browser'
+  openMode: 'browser' | 'embedded'
+}
+
+export interface StreamingPairingRecord {
+  providerId: MediaStreamingProviderId
+  code: string
+  generatedAt: string
+  status: 'pending' | 'paired'
+  pairedAt?: string
+}
+
+export interface StreamingTrendingItem {
+  id: string
+  providerId: MediaStreamingProviderId
+  title: string
+  url: string
+  cover?: string
+  description?: string
+  year?: number
 }
 
 export interface MediaSubtitle {
@@ -485,6 +599,11 @@ export interface MediaItem {
 
 export interface MediaLibraryFile {
   items: MediaItem[]
+  /**
+   * Absolute paths the user explicitly removed from the library. Subsequent
+   * scans skip these so dismissed items don't ressurface on every rescan.
+   */
+  excludedPaths?: string[]
   updatedAt: string
 }
 
@@ -716,27 +835,6 @@ export interface LaunchTerminateResult {
   terminatedPids: number[]
   note?: string
   error?: string
-}
-
-export type GameCompletionStatus = 'played' | 'completed' | 'platinum'
-
-export interface GameJourneyInput {
-  gameId: string
-  status: GameCompletionStatus
-  redownloadUrl?: string
-  sourceLabel?: string
-  sourceUrl?: string
-  captureSave?: boolean
-}
-
-export interface GameJourneyRecord extends GameJourneyInput {
-  title: string
-  gamePath: string
-  cover?: string
-  banner?: string
-  savedAt: string
-  saveSnapshotId?: string
-  saveWarning?: string
 }
 
 export interface DownloadProgress {

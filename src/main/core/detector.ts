@@ -32,6 +32,13 @@ export function detectPlatform(filePath: string): DetectionResult {
   const ext = extname(lower).slice(1)
   const name = basename(lower)
 
+  // Game asset internals under PC installs (catalog.bin, regulation.bin, etc.)
+  // were being misclassified as console ROMs because ".bin" is ambiguous.
+  if ((ext === 'bin' || ext === 'gz') && /\\pc\\/.test(lower)) {
+    flags.push('asset interno de jogo PC')
+    return { platform: 'unknown', confidence: 0.05, flags }
+  }
+
   // PS3 disc folders contain a PS3_GAME subfolder — handle that special case first.
   if (existsSync(filePath) && statSync(filePath).isDirectory()) {
     try {
@@ -95,7 +102,14 @@ export function detectPlatform(filePath: string): DetectionResult {
       }
       if (ambiguous) {
         flags.push('extensão genérica — confirme a plataforma manualmente')
-        // .pkg defaults to PS3 (more common than PS4 pkg dumps); .iso defaults to PS2.
+        // .wad is heavily overloaded across PC engines and WiiWare.
+        // Without a Wii path hint, keep it unknown to avoid flooding the
+        // library with internal game assets (e.g. God of War PC exec/wad/*).
+        if (ext === 'wad') {
+          return { platform: 'unknown', confidence: 0.15, flags }
+        }
+        // .pkg defaults to PS3 (more common than PS4 pkg dumps); .iso/.bin
+        // defaults to PS2 when no better hint exists.
         const fallback: PlatformId = ext === 'pkg' ? 'ps3' : 'ps2'
         return { platform: fallback, confidence: 0.45, flags }
       }

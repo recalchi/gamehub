@@ -9,9 +9,14 @@ import {
   Monitor,
   Sparkles
 } from 'lucide-react'
-import type { CrashStats, Game, PerformanceReport, PerformanceSample } from '@shared/types'
-
-const MSI_AFTERBURNER_DOWNLOAD_URL = 'https://us.msi.com/Landing/afterburner/graphics-cards'
+import type {
+  CrashStats,
+  Game,
+  PerfSessionSummary,
+  PerformanceReport,
+  PerformanceSample,
+  RtssStatus
+} from '@shared/types'
 
 interface SessionStats {
   fpsMin: number
@@ -40,27 +45,15 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
   const [report, setReport] = useState<PerformanceReport | null>(null)
   const [sessionStats, setSessionStats] = useState<SessionStats>(EMPTY_STATS)
   const [crashStats, setCrashStats] = useState<CrashStats | null>(null)
-  const [attachState, setAttachState] = useState<'idle' | 'checking' | 'attached' | 'not-found'>('idle')
+  const [sessions, setSessions] = useState<PerfSessionSummary[]>([])
+  const [rtss, setRtss] = useState<RtssStatus | null>(null)
+  const [rtssBusy, setRtssBusy] = useState(false)
+  const isPcGame = game.platform === 'pc'
   // FPS rolling sum kept outside React state to avoid render churn each tick.
   const fpsSumRef = useRef({ sum: 0, count: 0 })
-  const attachAttemptedRef = useRef(false)
-
-  async function attachRunningGame(): Promise<void> {
-    if (game.platform !== 'pc' || attachState === 'checking') return
-    setAttachState('checking')
-    const attached = await window.api.performance.attach(game.id)
-    if (attached) {
-      setSample(attached)
-      setAttachState('attached')
-    } else {
-      setAttachState('not-found')
-    }
-  }
 
   useEffect(() => {
     let cancelled = false
-    attachAttemptedRef.current = false
-    setAttachState('idle')
     void Promise.all([
       window.api.performance.latest(game.id),
       window.api.performance.report(game.id)
@@ -68,10 +61,6 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
       if (cancelled) return
       setSample(latest)
       setReport(latestReport)
-      if (game.platform === 'pc' && latest?.status !== 'running' && !attachAttemptedRef.current) {
-        attachAttemptedRef.current = true
-        void attachRunningGame()
-      }
     })
 
     const offSample = window.api.performance.onSample((next) => {
@@ -105,14 +94,60 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
       })
     })
     const offReport = window.api.performance.onReport((next) => {
-      if (next.gameId !== game.id) return
-      setReport(next)
-      if (game.platform === 'pc') void attachRunningGame()
+      if (next.gameId === game.id) setReport(next)
+      // Refresh persisted sessions when a run finishes — the NDJSON file for
+      // this session has just been flushed and is ready to read.
+      void window.api.performance.sessions(game.id, 10).then(setSessions)
     })
     // Crash history badge.
     void window.api.system.crashStats(game.id).then((s) => {
       if (!cancelled) setCrashStats(s)
     })
+    void window.api.performance.sessions(game.id, 10).then((list) => {
+      if (!cancelled) setSessions(list)
+    })
+    // RTSS status check for PC games — used to render the "ative o overlay"
+    // banner if FPS data isn't flowing.
+    if (isPcGame) {
+      // Auto-everything: don't wait for the user to click "Ativar RTSS".
+      // Fire status + ensure IN PARALLEL — status returns fast (cached helper
+      // probe) so the banner populates immediately, while ensure can take
+      // several seconds (UAC, csc build, etc.) without blocking the UI.
+      void window.api.performance.rtssStatus().then((status) => {
+        if (!cancelled) setRtss(status)
+      })
+      void window.api.performance
+        .rtssEnsure()
+        .catch(() => undefined)
+        .then(() => {
+          if (cancelled) return
+          void window.api.performance.rtssStatus().then((status) => {
+            if (!cancelled) setRtss(status)
+          })
+        })
+      // Tight poll for the first 30s so the banner & diagnostic populate
+      // fast right after the panel opens, then settle into a slower cadence.
+      let fastTicks = 0
+      const rtssTimer = setInterval(() => {
+        if (cancelled) return
+        fastTicks++
+        void window.api.performance.rtssStatus().then((status) => {
+          if (!cancelled) setRtss(status)
+        })
+        if (fastTicks === 6) {
+          // After ~30s of fast polling, slow down.
+          clearInterval(rtssTimer)
+          const slow = setInterval(() => {
+            if (cancelled) return
+            void window.api.performance.rtssStatus().then((status) => {
+              if (!cancelled) setRtss(status)
+            })
+          }, 15000)
+          ;(window as unknown as { __ghRtssTimer?: NodeJS.Timeout }).__ghRtssTimer = slow
+        }
+      }, 5000)
+      ;(window as unknown as { __ghRtssTimer?: NodeJS.Timeout }).__ghRtssTimer = rtssTimer
+    }
     const offCrash = window.api.system.onCrashRecorded((r) => {
       if (r.gameId !== game.id) return
       void window.api.system.crashStats(game.id).then(setCrashStats)
@@ -122,15 +157,46 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
       offSample()
       offReport()
       offCrash()
+      const w = window as unknown as { __ghRtssTimer?: NodeJS.Timeout }
+      if (w.__ghRtssTimer) {
+        clearInterval(w.__ghRtssTimer)
+        w.__ghRtssTimer = undefined
+      }
     }
-  }, [game.id])
+  }, [game.id, isPcGame])
 
-  useEffect(() => {
-    if (game.platform !== 'pc' || sample?.status === 'running' || attachAttemptedRef.current) return
-    attachAttemptedRef.current = true
-    void attachRunningGame()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game.id, game.platform, sample?.status])
+  const [rtssMessage, setRtssMessage] = useState<string | null>(null)
+
+  async function activateRtss(): Promise<void> {
+    setRtssBusy(true)
+    setRtssMessage(null)
+    // Hard timeout — the IPC call can stall behind a hidden UAC prompt or a
+    // slow tasklist probe; never leave the button locked forever.
+    const timeoutPromise = new Promise<'spawn-failed'>((resolve) =>
+      setTimeout(() => resolve('spawn-failed'), 15000)
+    )
+    const result = await Promise.race([
+      window.api.performance.rtssEnsure(),
+      timeoutPromise
+    ])
+    setRtssBusy(false)
+    if (result === 'not-installed') {
+      setRtssMessage('RTSS não encontrado no disco. Abrindo página de download…')
+      void window.api.system.openExternal('https://www.msi.com/Landing/afterburner/graphics-cards')
+    } else if (result === 'spawn-failed') {
+      setRtssMessage(
+        'Não consegui iniciar o RTSS (provavelmente o Windows pediu UAC). Abra o MSI Afterburner manualmente uma vez.'
+      )
+    } else if (result === 'already-running') {
+      setRtssMessage(
+        'RTSS já está rodando — se o FPS continua zerado, ative o "Show On-Screen Display" no Afterburner.'
+      )
+    } else {
+      setRtssMessage('RTSS iniciado. Aguarde alguns segundos para o FPS aparecer.')
+    }
+    const next = await window.api.performance.rtssStatus()
+    setRtss(next)
+  }
 
   // Reset session stats when a brand-new run starts (uptime resets to ~0).
   useEffect(() => {
@@ -185,6 +251,112 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
           </div>
         </div>
 
+        {isPcGame && sample?.fps === undefined && (
+          <div className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1">
+                <div className="text-amber-200 font-semibold text-sm">
+                  {!rtss
+                    ? 'Verificando RTSS…'
+                    : !rtss.installed
+                      ? 'RTSS (RivaTuner Statistics Server) não encontrado'
+                      : !rtss.running
+                        ? 'RTSS instalado mas não está rodando'
+                        : rtss.diagnostic.shmStatus === 'EMPTY'
+                          ? 'RTSS ativo mas sem nenhum jogo na lista de perfis'
+                          : rtss.diagnostic.shmStatus === 'NO_SHM'
+                            ? 'RTSS rodando, mas sem permissão para ler a memória compartilhada'
+                            : isNoSigPrivilegeIssue(rtss)
+                              ? 'GameHub precisa rodar como administrador para ler o FPS do RTSS'
+                              : rtss.diagnostic.shmStatus === 'NO_SIG'
+                                ? 'Memória compartilhada do RTSS encontrada mas com formato inesperado'
+                                : 'RTSS rodando mas sem dados de FPS chegando'}
+                </div>
+                <p className="text-[11px] text-amber-100/80 mt-1 leading-relaxed">
+                  {!rtss
+                    ? 'Conferindo se o RivaTuner Statistics Server está disponível…'
+                    : !rtss.installed
+                      ? 'O FPS dos jogos PC nativos vem da shared memory do RTSS (parte do MSI Afterburner). Instale e o painel pega o FPS automaticamente.'
+                      : !rtss.running
+                        ? 'Sem ele o FPS dos jogos PC não pode ser lido. GameHub pode iniciar agora — vai aparecer um prompt do Windows pedindo permissão.'
+                        : rtss.diagnostic.shmStatus === 'EMPTY'
+                          ? 'Abra o MSI Afterburner → Properties → On-Screen Display → marque "Show On-Screen Display" e mude "Application detection level" para "High". Depois reabra o jogo.'
+                          : rtss.diagnostic.shmStatus === 'NO_SHM'
+                            ? 'Provavelmente o RTSS está rodando em sessão elevada e o GameHub não. Feche o GameHub e rode como administrador (clique direito → Executar como administrador) uma vez.'
+                            : isNoSigPrivilegeIssue(rtss)
+                              ? 'O RTSS roda em modo administrador (sempre) e a memória compartilhada dele só permite leitura por outros processos administradores. Clique em "Reiniciar como admin" e o GameHub vai relançar elevado — depois disso o FPS começa a aparecer automaticamente.'
+                              : rtss.diagnostic.shmStatus === 'NO_SIG'
+                                ? 'O mapping foi aberto mas a leitura retornou bytes inválidos. Pode ser uma versão de RTSS diferente da esperada — abra um issue com o diagnóstico abaixo.'
+                                : 'Verifique no MSI Afterburner: Settings → On-Screen Display → "Show On-Screen Display" deve estar On. Em jogos com anti-cheat também é necessário adicionar o exe na lista de aplicações do RTSS.'}
+                </p>
+              </div>
+              {rtss && isNoSigPrivilegeIssue(rtss) ? (
+                <button
+                  type="button"
+                  onClick={() => void window.api.system.relaunchAsAdmin()}
+                  className="rounded-md bg-amber-400 px-4 py-2 text-xs font-semibold text-ink-950"
+                >
+                  Reiniciar como admin
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={rtssBusy || !rtss}
+                  onClick={() => void activateRtss()}
+                  className="rounded-md bg-amber-400 px-4 py-2 text-xs font-semibold text-ink-950 disabled:opacity-50"
+                >
+                  {rtssBusy
+                    ? 'Iniciando…'
+                    : !rtss
+                      ? 'Aguarde…'
+                      : !rtss.installed
+                        ? 'Baixar MSI Afterburner'
+                        : !rtss.running
+                          ? 'Ativar RTSS agora'
+                          : 'Reverificar'}
+                </button>
+              )}
+            </div>
+            {rtssMessage && (
+              <div className="text-[11px] text-amber-100 bg-amber-500/10 px-2 py-1.5 rounded">
+                {rtssMessage}
+              </div>
+            )}
+            {rtss && (
+            <details className="text-[10px] text-amber-200/70">
+              <summary className="cursor-pointer hover:text-amber-200">Diagnóstico técnico</summary>
+              <ul className="mt-1.5 space-y-0.5 font-mono">
+                <li>installPath: {rtss.installPath ?? '(não localizado)'}</li>
+                <li>helperBuilt: {String(rtss.diagnostic.helperBuilt)}</li>
+                <li>helperPath: {rtss.diagnostic.helperPath}</li>
+                {rtss.diagnostic.helperBuildError && (
+                  <li className="text-rose-300">buildError: {rtss.diagnostic.helperBuildError}</li>
+                )}
+                <li>lastEntryCount: {rtss.diagnostic.lastEntryCount}</li>
+                <li>lastProbeAt: {rtss.diagnostic.lastProbeAt ?? '—'}</li>
+                {rtss.diagnostic.shmStatus && (
+                  <li
+                    className={
+                      rtss.diagnostic.shmStatus === 'NO_SHM'
+                        ? 'text-rose-300'
+                        : rtss.diagnostic.shmStatus === 'OK'
+                          ? 'text-emerald-300'
+                          : ''
+                    }
+                  >
+                    shmStatus: {rtss.diagnostic.shmStatus}
+                    {rtss.diagnostic.shmDetail ? ` (${rtss.diagnostic.shmDetail})` : ''}
+                  </li>
+                )}
+                {rtss.diagnostic.lastProbeError && (
+                  <li className="text-rose-300">probeError: {rtss.diagnostic.lastProbeError}</li>
+                )}
+              </ul>
+            </details>
+            )}
+          </div>
+        )}
+
         <div className="mt-5 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           <Metric
             icon={Cpu}
@@ -206,7 +378,7 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
             icon={Activity}
             label="FPS"
             value={sample?.fps !== undefined ? `${sample.fps.toFixed(1)}` : '--'}
-            hint={sample?.fps !== undefined ? 'RTSS/MSI ou titulo' : 'RTSS nao exposto'}
+            hint={sample?.fps !== undefined ? 'do título do emulador' : 'não exposto'}
             tone={
               sample?.fps !== undefined
                 ? sample.fps < 30
@@ -244,46 +416,6 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
 
         {/* Session aggregates — live min/avg/max + peaks. Empty until enough
             samples have come in. */}
-        {!live && game.platform === 'pc' && (
-          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="font-semibold">Monitor desconectado do jogo ativo</div>
-              <div className="mt-0.5 text-xs text-amber-100/75">
-                O jogo pode estar aberto em outro PID. Reanexe o painel sem relancar o jogo.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => void attachRunningGame()}
-              disabled={attachState === 'checking'}
-              className="inline-flex items-center justify-center rounded-md bg-amber-200/20 px-3 py-2 text-xs font-semibold text-amber-50 transition hover:bg-amber-200/25 disabled:cursor-wait disabled:opacity-60"
-            >
-              {attachState === 'checking' ? 'Procurando...' : 'Reconectar monitor'}
-            </button>
-          </div>
-        )}
-
-        {game.platform === 'pc' && sample?.fps === undefined && (
-          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-sky-300/15 bg-sky-300/[0.06] p-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Monitor className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" />
-              <div>
-                <div className="font-semibold text-slate-100">FPS via MSI Afterburner + RTSS</div>
-                <div className="mt-0.5 text-xs text-slate-400">
-                  Instale/abra o RTSS junto com o jogo para o GameHub ler FPS em tempo real.
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => window.api.system.openExternal(MSI_AFTERBURNER_DOWNLOAD_URL)}
-              className="inline-flex items-center justify-center rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-white/15"
-            >
-              Baixar MSI Afterburner
-            </button>
-          </div>
-        )}
-
         {sessionStats.samples > 3 && (
           <div className="mt-4 rounded-lg border border-white/5 bg-white/[0.02] p-3">
             <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
@@ -329,6 +461,45 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
                   }
                 />
               )}
+            </div>
+          </div>
+        )}
+
+        {sessions.length > 0 && (
+          <div className="mt-4 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <Activity className="w-3 h-3" /> Histórico de sessões ({sessions.length})
+            </div>
+            <div className="flex items-end gap-1.5 h-20">
+              {sessions
+                .slice()
+                .reverse()
+                .map((s) => {
+                  const fps = s.fpsAvg ?? 0
+                  const heightPct = Math.max(6, Math.min(100, (fps / 120) * 100))
+                  const tone =
+                    fps < 30
+                      ? 'bg-rose-400'
+                      : fps < 50
+                        ? 'bg-amber-300'
+                        : 'bg-emerald-300'
+                  return (
+                    <div
+                      key={s.sessionId}
+                      className="flex-1 flex flex-col items-center gap-1 group relative"
+                      title={`${new Date(s.startedAt).toLocaleString()} — ${fps ? fps.toFixed(0) + ' FPS avg' : 'sem FPS'} (${s.sampleCount} amostras, ${Math.round(s.durationSeconds / 60)}min)`}
+                    >
+                      <div
+                        className={`w-full rounded-t ${tone} opacity-80`}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                    </div>
+                  )
+                })}
+            </div>
+            <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+              <span>Mais antiga</span>
+              <span>Mais recente</span>
             </div>
           </div>
         )}
@@ -463,6 +634,19 @@ function TextList({
       ))}
     </ul>
   )
+}
+
+/**
+ * NO_SIG with a zero (or all-FF) signature is the smoking-gun pattern for
+ * Mandatory Integrity Control denial — the kernel let us open RTSS's mapping
+ * (because the DACL is permissive) but reads return zeros because RTSS runs
+ * elevated and we don't. The fix is for the user to relaunch GameHub admin.
+ */
+function isNoSigPrivilegeIssue(rtss: RtssStatus): boolean {
+  if (rtss.diagnostic.shmStatus !== 'NO_SIG') return false
+  const d = rtss.diagnostic.shmDetail ?? ''
+  // sig=0x00000000 or sig=0xFFFFFFFF strongly indicates page-level access denial
+  return /sig=0x0+\b/i.test(d) || /sig=0xf{8}/i.test(d)
 }
 
 function formatMaybePercent(value?: number): string {

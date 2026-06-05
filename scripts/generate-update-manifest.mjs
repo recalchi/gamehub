@@ -8,10 +8,10 @@ const version = String(pkg.version)
 const channel = process.env.UPDATE_CHANNEL || 'stable'
 const minSupportedVersion = process.env.MIN_SUPPORTED_VERSION || version
 const releaseDir = join(root, 'release')
-const exeName = `GameHub-Setup-x64-${version}.exe`
+const exeName = 'GameHub-Setup-x64.exe'
 const exePath = join(releaseDir, exeName)
 const latestYmlPath = join(releaseDir, 'latest.yml')
-const portableName = `GameHub-portable-x64-${version}.zip`
+const portableName = 'GameHub-portable-x64.zip'
 const portablePath = join(releaseDir, portableName)
 
 if (!existsSync(exePath)) {

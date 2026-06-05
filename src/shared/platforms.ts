@@ -219,7 +219,17 @@ export const PLATFORM_LIST: PlatformInfo[] = Object.values(PLATFORMS)
   .sort((a, b) => a.releaseYear - b.releaseYear)
 
 /** Extensions that are ambiguous and require path / sibling-file heuristics */
-export const AMBIGUOUS_EXTENSIONS = new Set(['iso', 'bin', 'cue', 'chd', 'pbp', 'cso', 'gz', 'pkg'])
+export const AMBIGUOUS_EXTENSIONS = new Set([
+  'iso',
+  'bin',
+  'cue',
+  'chd',
+  'pbp',
+  'cso',
+  'gz',
+  'pkg',
+  'wad'
+])
 
 /** Archive extensions — we surface them but don't auto-extract */
 export const ARCHIVE_EXTENSIONS = new Set(['zip', '7z', 'rar', 'tar', 'gz'])

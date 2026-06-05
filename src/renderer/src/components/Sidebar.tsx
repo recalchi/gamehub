@@ -74,9 +74,28 @@ export default function Sidebar(): JSX.Element {
     const offE = window.api.launch.onEnded((evt) =>
       setActive((cur) => cur.filter((c) => c.gameId !== evt.gameId))
     )
+    const poll = window.setInterval(() => {
+      // Detached/native launchers can occasionally miss one lifecycle event.
+      // Poll keeps the "Now Playing" pill truthful even in those cases.
+      void window.api.launch.active().then((list) => {
+        setActive((cur) => {
+          const sameSize = cur.length === list.length
+          if (
+            sameSize &&
+            cur.every((entry) =>
+              list.some((next) => next.gameId === entry.gameId && next.pid === entry.pid)
+            )
+          ) {
+            return cur
+          }
+          return list
+        })
+      })
+    }, 4000)
     return () => {
       offS()
       offE()
+      window.clearInterval(poll)
     }
   }, [])
 

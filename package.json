@@ -1,6 +1,6 @@
 {
   "name": "gamehub",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "A fullscreen game launcher and emulator hub for PC, inspired by modern console interfaces.",
   "main": "out/main/index.cjs",
   "author": "GameHub",
@@ -20,7 +20,8 @@
     "publish:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win nsis --x64 --publish always",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web"
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest"
   },
   "build": {
     "appId": "com.recalchi.gamehub",
@@ -51,7 +52,7 @@
           ]
         }
       ],
-      "artifactName": "GameHub-Setup-${arch}-${version}.${ext}",
+      "artifactName": "GameHub-Setup-${arch}.${ext}",
       "verifyUpdateCodeSignature": true,
       "signAndEditExecutable": false
     },
@@ -64,10 +65,17 @@
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "menuCategory": "GameHub",
+      "shortcutName": "GameHub",
+      "uninstallDisplayName": "GameHub ${version}",
       "installerLanguages": [
         "pt_BR",
         "en_US"
-      ]
+      ],
+      "differentialPackage": true
     }
   },
   "dependencies": {
@@ -95,6 +103,7 @@
     "rcedit": "^5.0.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
   }
 }

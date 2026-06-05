@@ -368,12 +368,14 @@ export async function scanMediaLibrary(options: { fresh?: boolean } = {}): Promi
   const errors: string[] = []
   const found: MediaItem[] = []
 
+  const excluded = new Set((mediaStore.load().excludedPaths ?? []).map((p) => p.toLowerCase()))
   for (const root of settings.media.mediaRoots) {
     if (!existsSync(root)) {
       errors.push(`Pasta nao encontrada: ${root}`)
       continue
     }
     walkVideos(root, 6, errors, (path) => {
+      if (excluded.has(path.toLowerCase())) return
       const item = classifyMedia(path, previous)
       if (item) found.push(item)
     })
@@ -498,6 +500,46 @@ export function recordMediaWatch(input: MediaWatchInput): MediaWatchRecord | { e
  * the existing `favorite` field — the Cinema UI surfaces it as a Netflix-style
  * watchlist row, while the field name keeps storage compatibility.
  */
+/**
+ * Drop a media entry from the local library. If `deleteFile` is set and the
+ * file lives under one of our managed download roots, we also try to unlink
+ * it from disk — outside those roots we deliberately keep the file in place
+ * (it might be the user's own collection in another folder).
+ */
+export async function removeMediaFromLibrary(
+  id: string,
+  options: { deleteFile?: boolean } = {}
+): Promise<{ ok: true; deletedFile: boolean } | { error: string }> {
+  const item = mediaStore.load().items.find((entry) => entry.id === id)
+  if (!item) return { error: 'Mídia não encontrada.' }
+
+  const removed = mediaStore.removeItem(id)
+  if (!removed) return { error: 'Falha ao remover entrada da biblioteca.' }
+
+  // Remember the path so a rescan does not re-add the same file. The user
+  // explicitly excluded it — surprise re-import would be obnoxious.
+  if (item.path) mediaStore.exclude(item.path)
+
+  // Also purge watch history record so a deleted item doesn't ghost-resurface
+  // in "Continuar assistindo" later.
+  watchedMediaStore.removeByMediaId(id)
+
+  let deletedFile = false
+  if (options.deleteFile && item.path && existsSync(item.path)) {
+    const managed = item.path.startsWith(PATHS.mediaDownloads)
+    if (managed) {
+      try {
+        const { rmSync } = await import('node:fs')
+        rmSync(item.path, { force: true })
+        deletedFile = true
+      } catch (err) {
+        log.warn('cinema', `failed to delete ${item.path}: ${String(err)}`)
+      }
+    }
+  }
+  return { ok: true, deletedFile }
+}
+
 export function toggleMediaFavorite(id: string): MediaItem | { error: string } {
   const item = mediaStore.load().items.find((entry) => entry.id === id)
   if (!item) return { error: 'Midia nao encontrada.' }

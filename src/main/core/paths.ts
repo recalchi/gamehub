@@ -27,8 +27,11 @@ export const PATHS = {
   logs: ensure(join(userData, 'logs')),
   covers: ensure(join(userData, 'covers')),
   banners: ensure(join(userData, 'banners')),
+  journeyCovers: ensure(join(userData, 'journey-covers')),
+  journeyBanners: ensure(join(userData, 'journey-banners')),
   mediaDownloads: ensure(join(userData, 'media-downloads')),
   saves: ensure(join(userData, 'saves')),
+  perf: ensure(join(userData, 'perf')),
   mods: ensure(join(userData, 'mods')),
   cache: ensure(join(userData, 'cache')),
   settingsFile: join(userData, 'settings.json'),
@@ -36,5 +39,7 @@ export const PATHS = {
   gameJourneyFile: join(userData, 'game-journey.json'),
   mediaLibraryFile: join(userData, 'media-library.json'),
   mediaWatchedFile: join(userData, 'media-watched.json'),
-  modInstallsFile: join(userData, 'mod-installs.json')
+  modInstallsFile: join(userData, 'mod-installs.json'),
+  journeyFile: join(userData, 'game-journey.json'),
+  achievementsProgressFile: join(userData, 'achievements-progress.json')
 }

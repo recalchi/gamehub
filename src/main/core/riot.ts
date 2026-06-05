@@ -1,5 +1,36 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+
+function safeDirSize(dir: string): number {
+  if (!dir || !existsSync(dir)) return 0
+  let total = 0
+  const stack: string[] = [dir]
+  let visited = 0
+  // Cap traversal to avoid pathological multi-million-file installs choking
+  // the import. 50k entries is plenty for any real game.
+  while (stack.length > 0 && visited < 50000) {
+    const current = stack.pop()!
+    visited += 1
+    let entries: string[]
+    try {
+      entries = readdirSync(current)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = join(current, entry)
+      let st
+      try {
+        st = statSync(full)
+      } catch {
+        continue
+      }
+      if (st.isDirectory()) stack.push(full)
+      else total += st.size
+    }
+  }
+  return total
+}
 import { createHash } from 'node:crypto'
 import { libraryStore, settingsStore } from './store'
 import { log } from './logger'
@@ -84,13 +115,50 @@ const STANDARD_ROOTS = [
   'C:\\Program Files (x86)\\Riot Games',
   'D:\\Riot Games',
   'D:\\Jogos\\Riot Games',
+  'D:\\Games\\Riot Games',
   'E:\\Riot Games',
-  'E:\\Jogos\\Riot Games'
+  'E:\\Jogos\\Riot Games',
+  'E:\\Games\\Riot Games',
+  'F:\\Riot Games',
+  'F:\\Jogos\\Riot Games',
+  'G:\\Riot Games'
 ]
+
+/**
+ * Riot ships a `RiotClientInstalls.json` next to every installed product. It
+ * lists install paths the Riot Client knows about — checking it picks up
+ * non-default install locations without depending on the user adding the
+ * folder to gameRoots.
+ */
+const RIOT_INSTALLS_MANIFEST =
+  'C:\\ProgramData\\Riot Games\\RiotClientInstalls.json'
+
+function rootsFromManifest(): string[] {
+  if (!existsSync(RIOT_INSTALLS_MANIFEST)) return []
+  try {
+    const data = JSON.parse(readFileSync(RIOT_INSTALLS_MANIFEST, 'utf8')) as Record<string, unknown>
+    const out = new Set<string>()
+    const associated = data.associated_client
+    if (associated && typeof associated === 'object') {
+      for (const key of Object.keys(associated)) {
+        // Key is the install path (e.g. "C:/Riot Games/League of Legends/").
+        const cleaned = key.replace(/\//g, '\\').replace(/\\+$/, '')
+        // The product folder lives one level above the per-product subfolder.
+        const parent = cleaned.split('\\').slice(0, -1).join('\\')
+        if (parent) out.add(parent)
+      }
+    }
+    return Array.from(out)
+  } catch {
+    return []
+  }
+}
 
 export function detectRiotGames(): RiotInstall[] {
   const out: RiotInstall[] = []
   const roots = new Set<string>(STANDARD_ROOTS)
+  // Riot Client's own manifest of known installs (covers non-default paths).
+  for (const r of rootsFromManifest()) roots.add(r)
   // Also probe each gameRoot for a "Riot Games" subdir.
   for (const root of settingsStore.load().gameRoots) {
     roots.add(join(root, 'Riot Games'))
@@ -154,7 +222,7 @@ export async function importRiotGames(): Promise<{ added: number; updated: numbe
       path: riotLaunchUri(inst.product, inst.patchline),
       platform: 'pc',
       emulator: 'native',
-      sizeBytes: 0, // Riot installs are huge; skip recursive sum
+      sizeBytes: safeDirSize(inst.installDir),
       confidence: 1,
       status: 'ready',
       addedAt: wasThere?.addedAt ?? new Date().toISOString(),

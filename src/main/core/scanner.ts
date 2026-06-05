@@ -493,7 +493,10 @@ function classify(
     path,
     platform,
     emulator: platform === 'pc' ? 'native' : matchedEmulator?.id,
-    sizeBytes: st.isDirectory() ? 0 : st.size,
+    // For directory entries (PC games, multi-file ROMs) walk the tree once
+    // so the user sees a real install size instead of 0. Falls back to 0
+    // only if the walk itself fails.
+    sizeBytes: st.isDirectory() ? directorySizeBytes(path) : st.size,
     confidence: det.confidence,
     status,
     addedAt: prev?.addedAt ?? new Date().toISOString(),
@@ -730,7 +733,10 @@ function enrichPcPlaytimeFromSteam(games: Game[]): number {
     const fromUri = game.path.match(/^steam:\/\/rungameid\/(\d+)/i)?.[1]
     const byUri = fromUri ? byAppId.get(fromUri) : undefined
     const byPath = matchSteamByInstallDir(game.path, byInstallDir)
-    const byName = pickSteamByTitle(game, byTitle)
+    // Title fallback only when the install path is ALSO inside a Steam library.
+    // Otherwise a standalone PC install of the same game would inherit Steam
+    // playtime — violating the PC ↔ Steam isolation rule.
+    const byName = byPath ? pickSteamByTitle(game, byTitle) : undefined
     const best = byUri ?? byPath ?? byName
     if (!best) continue
 

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import {
+  Archive,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -16,7 +17,8 @@ import {
   Star,
   X
 } from 'lucide-react'
-import { CURATED_CATALOG, type CuratedEntry } from '@shared/curated'
+import { CURATED_CATALOG, MOD_RECOMMENDATIONS, type CuratedEntry } from '@shared/curated'
+import { SYSTEM_REQUIREMENTS, normalizeReqsKey } from '@shared/systemRequirements'
 import { MINECRAFT_VERSION_OPTIONS } from '@shared/modCatalog'
 import { PLATFORMS } from '@shared/platforms'
 import { useLibraryStore } from '../store/library'
@@ -32,8 +34,19 @@ import type {
   ModDownloadProgress,
   ModInstallRecord,
   ModInstallTarget,
-  PlatformId
+  PlatformId,
+  GameJourneyRecord
 } from '@shared/types'
+
+type MyCatalogEntry = {
+  id: string
+  title: string
+  platform: PlatformId
+  cover?: string
+  sizeBytes: number
+  redownloadUrl?: string
+  status: 'instalado' | 'arquivado'
+}
 
 /**
  * Visual catalog of legally-redistributable games.
@@ -54,7 +67,8 @@ export default function Catalog(): JSX.Element {
   const [downloadIdToEntry, setDownloadIdToEntry] = useState<Map<string, string>>(new Map())
   const [activePlatform, setActivePlatform] = useState<PlatformId | 'all'>('all')
   const [bulkRunning, setBulkRunning] = useState(false)
-  const [section, setSection] = useState<'games' | 'mods'>('games')
+  const [section, setSection] = useState<'games' | 'mine' | 'mods'>('games')
+  const [journey, setJourney] = useState<GameJourneyRecord[]>([])
   const [mods, setMods] = useState<ModCatalogEntry[]>([])
   const [modInstalls, setModInstalls] = useState<ModInstallRecord[]>([])
   const [modProgress, setModProgress] = useState<Map<string, ModDownloadProgress>>(new Map())
@@ -86,6 +100,10 @@ export default function Catalog(): JSX.Element {
         setModInstalls(installed)
       })
       .finally(() => setModsLoading(false))
+  }, [])
+
+  useEffect(() => {
+    void window.api.journey.list().then(setJourney)
   }, [])
 
   useEffect(() => {
@@ -139,6 +157,49 @@ export default function Catalog(): JSX.Element {
     if (installedById.has(e.id)) return total
     return total + (e.approxSizeMb ?? 0)
   }, 0)
+
+  const myCatalog = useMemo(() => {
+    const byId = new Map<string, MyCatalogEntry>()
+
+    for (const game of games) {
+      const link =
+        game.path.startsWith('steam://') || game.path.startsWith('com.epicgames.launcher://')
+          ? game.path
+          : undefined
+      byId.set(game.id, {
+        id: game.id,
+        title: game.title,
+        platform: game.platform,
+        cover: game.cover,
+        sizeBytes: game.sizeBytes,
+        redownloadUrl: link,
+        status: 'instalado'
+      })
+    }
+
+    for (const record of journey) {
+      const current = byId.get(record.gameId)
+      if (current) {
+        byId.set(record.gameId, {
+          ...current,
+          redownloadUrl: current.redownloadUrl ?? record.redownloadUrl,
+          cover: current.cover ?? record.cover
+        })
+        continue
+      }
+      byId.set(record.gameId, {
+        id: record.gameId,
+        title: record.title,
+        platform: record.platform,
+        cover: record.cover,
+        sizeBytes: 0,
+        redownloadUrl: record.redownloadUrl,
+        status: 'arquivado'
+      })
+    }
+
+    return Array.from(byId.values()).sort((a, b) => a.title.localeCompare(b.title))
+  }, [games, journey])
 
   async function install(entry: CuratedEntry): Promise<void> {
     const r = await window.api.downloads.start({
@@ -257,6 +318,12 @@ export default function Catalog(): JSX.Element {
             label="Mods"
             onClick={() => setSection('mods')}
           />
+          <SegmentButton
+            active={section === 'mine'}
+            icon={<Archive className="w-4 h-4" />}
+            label="Biblioteca GameHub"
+            onClick={() => setSection('mine')}
+          />
         </div>
 
         {/* Platform filter chips */}
@@ -301,6 +368,17 @@ export default function Catalog(): JSX.Element {
             })}
           </AnimatePresence>
         </div>
+      ) : section === 'mine' ? (
+        <div className="space-y-3">
+          <div className="text-xs text-slate-400">
+            Catálogo leve gerado a partir da biblioteca + jornada (zerados/platinados), sem subir binários.
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {myCatalog.map((entry) => (
+              <MyCatalogCard key={entry.id} entry={entry} />
+            ))}
+          </div>
+        </div>
       ) : (
         <ModCatalogView
           entries={mods}
@@ -321,6 +399,11 @@ export default function Catalog(): JSX.Element {
       {section === 'games' && visible.length === 0 && (
         <div className="text-center text-slate-500 py-16">
           Nenhum jogo neste filtro ainda.
+        </div>
+      )}
+      {section === 'mine' && myCatalog.length === 0 && (
+        <div className="text-center text-slate-500 py-16">
+          Nenhum item ainda. Marque jogos em Conquistas para manter histórico com link e capa.
         </div>
       )}
     </RouteTransition>
@@ -349,6 +432,96 @@ function SegmentButton({
       {icon}
       {label}
     </button>
+  )
+}
+
+function MyCatalogCard({ entry }: { entry: MyCatalogEntry }): JSX.Element {
+  const platform = PLATFORMS[entry.platform]
+  const titleKey = normalizeReqsKey(entry.title)
+  const mods = entry.platform === 'pc' ? MOD_RECOMMENDATIONS[titleKey] : undefined
+  const reqs = entry.platform === 'pc' ? SYSTEM_REQUIREMENTS[titleKey] : undefined
+  const [showReqs, setShowReqs] = useState(false)
+  return (
+    <div className="rounded-xl overflow-hidden border border-white/10 bg-white/[0.03]">
+      <div
+        className="h-36"
+        style={{
+          background: entry.cover
+            ? `url(${entry.cover}) center/cover`
+            : `linear-gradient(150deg, ${platform?.color ?? '#64748b'}, rgba(10,12,20,.92))`
+        }}
+      />
+      <div className="p-3">
+        <div className="text-[10px] uppercase tracking-wider text-accent">
+          {platform?.shortName ?? entry.platform} • {entry.status}
+        </div>
+        <h3 className="mt-1 font-display font-semibold line-clamp-2">{entry.title}</h3>
+        <div className="mt-2 text-xs text-slate-400">
+          {entry.sizeBytes > 0 ? formatSize(entry.sizeBytes) : 'Tamanho não medido ainda'}
+        </div>
+        {reqs && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowReqs((current) => !current)}
+              className="text-[11px] inline-flex items-center gap-1 text-accent hover:text-accent/80"
+            >
+              {showReqs ? 'Ocultar requisitos' : 'Ver requisitos do sistema'}
+            </button>
+            {showReqs && (
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <RequirementsBlock label="Mínimo" tone="slate" spec={reqs.minimum} />
+                <RequirementsBlock label="Recomendado" tone="emerald" spec={reqs.recommended} />
+              </div>
+            )}
+          </div>
+        )}
+        {mods && mods.length > 0 && (
+          <div className="mt-3 rounded-lg border border-white/5 bg-black/30 p-2">
+            <div className="text-[10px] uppercase tracking-wider text-amber-300 mb-1.5 flex items-center gap-1">
+              <Puzzle className="w-3 h-3" /> Mods recomendados
+            </div>
+            <ul className="space-y-1">
+              {mods.slice(0, 3).map((mod) => (
+                <li key={mod.url}>
+                  <button
+                    type="button"
+                    onClick={() => window.api.system.openExternal(mod.url)}
+                    className="text-left w-full text-[11px] text-slate-200 hover:text-accent inline-flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate">{mod.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          {entry.redownloadUrl ? (
+            <button
+              type="button"
+              onClick={() => window.api.system.openExternal(entry.redownloadUrl!)}
+              className="rounded bg-accent px-3 py-1 text-xs font-semibold text-ink-950 hover:bg-accent/90 inline-flex items-center gap-1"
+            >
+              <Download className="w-3 h-3" />
+              Baixar
+            </button>
+          ) : (
+            entry.status === 'instalado' ? (
+              <Link
+                to={`/game/${entry.id}#journey-archive`}
+                className="rounded bg-white/10 px-3 py-1 text-xs font-semibold hover:bg-white/15"
+              >
+                Definir link
+              </Link>
+            ) : (
+              <span className="text-[11px] text-slate-500">Sem link salvo</span>
+            )
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -394,10 +567,23 @@ function ModCatalogView({
 
   return (
     <div>
+      <section className="glass rounded-xl p-4 mb-5 border border-amber-400/20 bg-amber-400/5">
+        <div className="flex items-start gap-2">
+          <Puzzle className="w-4 h-4 mt-0.5 text-amber-300" />
+          <div>
+            <h2 className="font-display font-semibold text-sm">Mods para Minecraft</h2>
+            <p className="text-[11px] text-slate-300 leading-relaxed mt-1">
+              Estes mods são exclusivos do <strong>Minecraft (Java Edition)</strong> via Modrinth.
+              Para mods de outros jogos PC (Skyrim, Elden Ring, Cyberpunk, etc.), abra a aba
+              <strong> Biblioteca GameHub</strong> — cada jogo lista mods recomendados na sua ficha.
+            </p>
+          </div>
+        </div>
+      </section>
       <section className="glass rounded-xl p-4 mb-5">
         <div className="flex items-center gap-2 mb-3">
           <Settings2 className="w-4 h-4 text-accent" />
-          <h2 className="font-display font-semibold">Auto-configuracao de mods</h2>
+          <h2 className="font-display font-semibold">Auto-configuracao de mods (Minecraft)</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <SelectSetting
@@ -879,6 +1065,53 @@ const CatalogCard = forwardRef<HTMLDivElement, CatalogCardProps>(function Catalo
     </motion.div>
   )
 })
+
+function RequirementsBlock({
+  label,
+  tone,
+  spec
+}: {
+  label: string
+  tone: 'slate' | 'emerald'
+  spec: { os: string; cpu: string; gpu: string; ramGb: number; storageGb: number; notes?: string }
+}): JSX.Element {
+  const ring = tone === 'emerald' ? 'border-emerald-400/30 bg-emerald-400/5' : 'border-white/10 bg-black/20'
+  const labelTone = tone === 'emerald' ? 'text-emerald-300' : 'text-slate-300'
+  return (
+    <div className={`rounded-md border ${ring} p-2`}>
+      <div className={`text-[10px] uppercase tracking-wider ${labelTone} mb-1`}>{label}</div>
+      <ul className="text-[11px] text-slate-300 space-y-0.5">
+        <li>
+          <span className="text-slate-500">OS:</span> {spec.os}
+        </li>
+        <li>
+          <span className="text-slate-500">CPU:</span> {spec.cpu}
+        </li>
+        <li>
+          <span className="text-slate-500">GPU:</span> {spec.gpu}
+        </li>
+        <li>
+          <span className="text-slate-500">RAM:</span> {spec.ramGb} GB
+        </li>
+        <li>
+          <span className="text-slate-500">Disco:</span> {spec.storageGb} GB
+        </li>
+        {spec.notes && (
+          <li className="text-[10px] text-amber-300 mt-1">{spec.notes}</li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+function normalizeTitleForMods(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
 
 function formatSize(bytes: number): string {
   if (!bytes) return '0 B'

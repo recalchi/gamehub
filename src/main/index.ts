@@ -308,31 +308,59 @@ function streamFileResponse(filePath: string, request: Request): Response {
  */
 function streamTranscodePipe(sourcePath: string): Response | null {
   const bin = ffmpegBinary()
-  if (!bin) return null
+  if (!bin) {
+    log.warn('cinema-pipe', 'ffmpeg-static not available')
+    return null
+  }
+  // Battle-tested fragmented MP4 over pipe. Critical points:
+  //   - NO +faststart (incompatible with pipe — requires seekable output)
+  //   - separate_moof: each fragment self-contained, Chromium starts playing
+  //     after the first one (~2s) instead of waiting for the whole moov
+  //   - -g 60 + sc_threshold 0: forced 2s keyframe interval matches frag size
+  //   - -profile:v main -level 4.0: Chromium-friendly H264 baseline
+  //   - -movflags +frag_every_frame+empty_moov+default_base_moof+separate_moof
+  //   - -frag_duration 2000000 (microseconds = 2s fragments)
   const ff = spawn(
     bin,
     [
+      '-loglevel', 'error',
       '-i', sourcePath,
       '-map', '0:v:0',
       '-map', '0:a:0?',
       '-c:v', 'libx264',
-      '-preset', 'ultrafast',
+      '-preset', 'veryfast',
       '-tune', 'zerolatency',
+      '-profile:v', 'main',
+      '-level', '4.0',
       '-pix_fmt', 'yuv420p',
+      '-g', '60',
+      '-keyint_min', '60',
+      '-sc_threshold', '0',
       '-c:a', 'aac',
       '-ac', '2',
       '-b:a', '160k',
+      '-ar', '48000',
       '-f', 'mp4',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+      '-movflags', '+frag_keyframe+empty_moov+default_base_moof+separate_moof',
+      '-frag_duration', '2000000',
+      '-reset_timestamps', '1',
       'pipe:1'
     ],
     { windowsHide: true }
   )
+  let stderrBuf = ''
   ff.stderr.on('data', (chunk) => {
-    // Surface ffmpeg progress lines to logs at debug level only.
-    log.debug?.('cinema-pipe', String(chunk).trim().slice(0, 200))
+    const s = String(chunk)
+    stderrBuf += s
+    if (stderrBuf.length > 4000) stderrBuf = stderrBuf.slice(-4000)
+    log.warn('cinema-pipe', s.trim().slice(0, 240))
   })
-  ff.on('error', (err) => log.warn('cinema-pipe', `ffmpeg error: ${err.message}`))
+  ff.on('error', (err) => log.warn('cinema-pipe', `ffmpeg spawn error: ${err.message}`))
+  ff.on('exit', (code) => {
+    if (code && code !== 0) {
+      log.warn('cinema-pipe', `ffmpeg exited code=${code} tail=${stderrBuf.slice(-400)}`)
+    }
+  })
   const headers = new Headers({
     'content-type': 'video/mp4',
     'cache-control': 'no-store'

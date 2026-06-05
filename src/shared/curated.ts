@@ -32,6 +32,81 @@ export interface CuratedEntry {
   sha256?: string
   /** Approximate size in MB, for UX before download starts */
   approxSizeMb?: number
+  /** Optional curated mod links shown when this game is installed. */
+  mods?: CuratedModLink[]
+}
+
+export interface CuratedModLink {
+  source: 'nexusmods' | 'modrinth' | 'github' | 'official' | 'other'
+  url: string
+  title: string
+  description?: string
+}
+
+/**
+ * Standalone mod recommendations matched by normalized title rather than by
+ * curated-entry id. Lets us surface mods for games the user installed outside
+ * the curated catalog (Steam, manual install, etc.).
+ */
+export const MOD_RECOMMENDATIONS: Record<string, CuratedModLink[]> = {
+  'elden ring': [
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/eldenring/mods/510',
+      title: 'Seamless Co-op',
+      description: 'Co-op completo sem invasões; o mod mais popular de Elden Ring.'
+    },
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/eldenring/mods/3419',
+      title: 'The Convergence',
+      description: 'Overhaul gigante: classes novas, magias e itens.'
+    }
+  ],
+  'skyrim': [
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/skyrimspecialedition/mods/266',
+      title: 'SKSE64 / Address Library',
+      description: 'Base para qualquer setup de mods em Skyrim SE.'
+    },
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/skyrimspecialedition/mods/30',
+      title: 'Unofficial Skyrim Special Edition Patch',
+      description: 'Pacote essencial de correções de bugs.'
+    }
+  ],
+  'minecraft': [
+    {
+      source: 'modrinth',
+      url: 'https://modrinth.com/mod/sodium',
+      title: 'Sodium',
+      description: 'Otimização de renderização — performance massiva.'
+    },
+    {
+      source: 'modrinth',
+      url: 'https://modrinth.com/mod/iris',
+      title: 'Iris Shaders',
+      description: 'Suporte a shaders compatível com Sodium.'
+    }
+  ],
+  'the witcher 3 wild hunt': [
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/witcher3/mods/1021',
+      title: 'HD Reworked Project',
+      description: 'Texturas em alta resolução, otimizado.'
+    }
+  ],
+  'cyberpunk 2077': [
+    {
+      source: 'nexusmods',
+      url: 'https://www.nexusmods.com/cyberpunk2077/mods/107',
+      title: 'CyberEngineTweaks',
+      description: 'Console + framework para tweaks/scripts.'
+    }
+  ]
 }
 
 export const CURATED_CATALOG: CuratedEntry[] = [

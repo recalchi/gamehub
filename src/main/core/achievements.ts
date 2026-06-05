@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { libraryStore } from './store'
 import { log } from './logger'
+import { resolveLocalCatalogEntry } from './achievements/local-catalog'
 import type {
   AchievementDefinition,
   AchievementSourceStatus,
@@ -69,6 +70,25 @@ export async function achievementDetail(gameId: string): Promise<GameAchievement
 }
 
 function buildSummary(game: Game, achievements: AchievementDefinition[]): GameAchievementSummary {
+  // Bundled catalog wins when available — it works without Steam being
+  // installed and covers PC titles outside the Steam ecosystem.
+  const local = resolveLocalCatalogEntry(game)
+  if (local) {
+    return {
+      gameId: game.id,
+      gameTitle: game.title,
+      platform: game.platform,
+      cover: game.cover,
+      provider: 'local-catalog',
+      status: 'ready',
+      total: local.achievements.length,
+      sourceLabel: local.sourceLabel,
+      sourceDetail: 'Conquistas mapeadas no catálogo local do GameHub.',
+      sourceUrl: local.sourceUrl,
+      updatedAt: new Date().toISOString()
+    }
+  }
+
   const appId = steamAppId(game)
   if (appId) {
     const status: AchievementSourceStatus = achievements.length > 0 ? 'ready' : 'not-cached'
@@ -122,6 +142,8 @@ function buildSummary(game: Game, achievements: AchievementDefinition[]): GameAc
 }
 
 function readDefinitions(game: Game): AchievementDefinition[] {
+  const local = resolveLocalCatalogEntry(game)
+  if (local) return local.achievements
   const appId = steamAppId(game)
   if (!appId) return []
   const schemaPath = findSteamSchema(appId)

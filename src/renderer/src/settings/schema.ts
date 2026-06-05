@@ -73,8 +73,9 @@ export const SETTINGS_SCHEMA = {
   'appearance.showRealBootLogs': {
     type: 'bool',
     label: 'Splash mostra logs reais do processo principal',
-    description: 'Troca as linhas de boot decorativas pelos eventos vindos do main.',
-    default: false
+    description:
+      'Troca as linhas de boot decorativas pelos eventos vindos do main. Ligado por padrão — você sempre vê o que está acontecendo durante a abertura.',
+    default: true
   },
   'appearance.reducedMotionMode': {
     type: 'select',

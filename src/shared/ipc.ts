@@ -62,7 +62,15 @@ export const IPC = {
     /** broadcast: PerformanceSample while a game is running */
     sample: 'performance:sample',
     /** broadcast: PerformanceReport when the monitored process exits */
-    reportReady: 'performance:report-ready'
+    reportReady: 'performance:report-ready',
+    /** ipc: list past session summaries for a game */
+    sessions: 'performance:sessions',
+    /** ipc: read full samples of one session for a game */
+    session: 'performance:session',
+    /** ipc: RTSS installed/running status (for the "ativar overlay" banner) */
+    rtssStatus: 'performance:rtss-status',
+    /** ipc: ask GameHub to launch RTSS if installed */
+    rtssEnsure: 'performance:rtss-ensure'
   },
   discord: {
     /** ipc: returns current Discord RPC connection/config status */
@@ -72,7 +80,9 @@ export const IPC = {
   },
   achievements: {
     summaries: 'achievements:summaries',
-    game: 'achievements:game'
+    game: 'achievements:game',
+    toggle: 'achievements:toggle',
+    progress: 'achievements:progress'
   },
   journey: {
     list: 'journey:list',
@@ -115,7 +125,11 @@ export const IPC = {
     clearWatch: 'media:clear-watch',
     exportWatched: 'media:export-watched',
     refreshArtwork: 'media:refresh-artwork',
-    progress: 'media:progress'
+    progress: 'media:progress',
+    removeFromLibrary: 'media:remove-from-library',
+    streamingTrending: 'media:streaming-trending',
+    streamingPairing: 'media:streaming-pairing',
+    streamingConfirmPaired: 'media:streaming-confirm-paired'
   },
   system: {
     pickFolder: 'system:pick-folder',
@@ -161,6 +175,8 @@ export const IPC = {
     /** broadcast: emitted right after a crash is persisted */
     crashRecorded: 'system:crash-recorded',
     /** ipc: read full log of a specific crash */
-    readCrashLog: 'system:read-crash-log'
+    readCrashLog: 'system:read-crash-log',
+    /** ipc: relaunch the app elevated (Windows) to enable RTSS reading */
+    relaunchAsAdmin: 'system:relaunch-as-admin'
   }
 } as const

@@ -26,10 +26,12 @@ const STATUS_FILTERS: Array<{ id: GameStatus | 'all'; label: string }> = [
   { id: 'corrupted', label: 'Suspeitos' }
 ]
 
-type SortKey = 'title' | 'playTime' | 'addedAt' | 'lastPlayedAt'
+type SortKey = 'title' | 'sizeBytes' | 'playTime' | 'addedAt' | 'lastPlayedAt'
+type SizeFilter = 'all' | 'lt1gb' | '1to10gb' | '10to50gb' | 'gt50gb'
 
 const SORT_OPTIONS: Array<{ id: SortKey; label: string }> = [
   { id: 'title', label: 'Título' },
+  { id: 'sizeBytes', label: 'Tamanho' },
   { id: 'playTime', label: 'Tempo jogado' },
   { id: 'addedAt', label: 'Adição' },
   { id: 'lastPlayedAt', label: 'Última vez' }
@@ -48,6 +50,11 @@ export default function Library(): JSX.Element {
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('title')
   const [sortAsc, setSortAsc] = useState(true)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [sizeFilter, setSizeFilter] = useState<SizeFilter>('all')
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [playedOnly, setPlayedOnly] = useState(false)
+  const [withCoverOnly, setWithCoverOnly] = useState(false)
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [pendingRoot, setPendingRoot] = useState('')
   const [scanMessage, setScanMessage] = useState<string | null>(null)
@@ -79,6 +86,10 @@ export default function Library(): JSX.Element {
       .filter((g) => (platform ? g.platform === platform : true))
       .filter((g) => (statusFilter === 'all' ? true : g.status === statusFilter))
       .filter((g) => (activeTag ? (g.tags ?? []).includes(activeTag) : true))
+      .filter((g) => (favoritesOnly ? Boolean(g.favorite) : true))
+      .filter((g) => (playedOnly ? (g.playTime ?? 0) > 0 : true))
+      .filter((g) => (withCoverOnly ? Boolean(g.cover) : true))
+      .filter((g) => matchesSizeFilter(g.sizeBytes ?? 0, sizeFilter))
       .filter((g) =>
         query.trim() === '' ? true : g.title.toLowerCase().includes(query.toLowerCase())
       )
@@ -87,6 +98,8 @@ export default function Library(): JSX.Element {
       switch (sortKey) {
         case 'title':
           return direction * a.title.localeCompare(b.title)
+        case 'sizeBytes':
+          return direction * ((a.sizeBytes ?? 0) - (b.sizeBytes ?? 0))
         case 'playTime':
           return direction * ((a.playTime ?? 0) - (b.playTime ?? 0))
         case 'addedAt':
@@ -96,13 +109,14 @@ export default function Library(): JSX.Element {
       }
     })
     return out
-  }, [games, platform, statusFilter, activeTag, query, sortKey, sortAsc])
+  }, [games, platform, statusFilter, activeTag, favoritesOnly, playedOnly, withCoverOnly, sizeFilter, query, sortKey, sortAsc])
 
   const currentPlatform = platform ? PLATFORMS[platform] : null
   const normalizedRoots = useMemo(
     () => normalizeRoots(settings?.gameRoots ?? []),
     [settings?.gameRoots]
   )
+  const activeAdvancedFilterCount = Number(sizeFilter !== 'all') + Number(favoritesOnly) + Number(playedOnly) + Number(withCoverOnly)
 
   async function addPendingRoots(raw: string): Promise<void> {
     if (!settings) return
@@ -324,6 +338,23 @@ export default function Library(): JSX.Element {
           ))}
 
           <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={() => setFiltersOpen((open) => !open)}
+              className={`px-2.5 py-1 rounded-md border transition-colors flex items-center gap-1.5 ${
+                filtersOpen || activeAdvancedFilterCount > 0
+                  ? 'border-accent/40 bg-accent/10 text-accent'
+                  : 'border-white/10 text-slate-300 hover:bg-white/5'
+              }`}
+              title="Filtros avançados"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              Filtros
+              {activeAdvancedFilterCount > 0 && (
+                <span className="rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] leading-none">
+                  {activeAdvancedFilterCount}
+                </span>
+              )}
+            </button>
             <span className="text-slate-500">Ordenar por:</span>
             <select
               value={sortKey}
@@ -349,6 +380,68 @@ export default function Library(): JSX.Element {
             </button>
           </div>
         </div>
+
+        {filtersOpen && (
+          <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span className="text-slate-400">Tamanho:</span>
+              <select
+                value={sizeFilter}
+                onChange={(e) => setSizeFilter(e.target.value as SizeFilter)}
+                className="bg-ink-800 border border-white/5 rounded-md px-2 py-1 outline-none focus:border-accent text-xs"
+              >
+                <option value="all">Todos</option>
+                <option value="lt1gb">Até 1 GB</option>
+                <option value="1to10gb">1 GB a 10 GB</option>
+                <option value="10to50gb">10 GB a 50 GB</option>
+                <option value="gt50gb">Acima de 50 GB</option>
+              </select>
+
+              <button
+                onClick={() => setFavoritesOnly((v) => !v)}
+                className={`px-2.5 py-1 rounded-md border ${
+                  favoritesOnly
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-white/10 text-slate-300 hover:bg-white/5'
+                }`}
+              >
+                Favoritos
+              </button>
+              <button
+                onClick={() => setPlayedOnly((v) => !v)}
+                className={`px-2.5 py-1 rounded-md border ${
+                  playedOnly
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-white/10 text-slate-300 hover:bg-white/5'
+                }`}
+              >
+                Já jogados
+              </button>
+              <button
+                onClick={() => setWithCoverOnly((v) => !v)}
+                className={`px-2.5 py-1 rounded-md border ${
+                  withCoverOnly
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-white/10 text-slate-300 hover:bg-white/5'
+                }`}
+              >
+                Com capa
+              </button>
+
+              <button
+                onClick={() => {
+                  setSizeFilter('all')
+                  setFavoritesOnly(false)
+                  setPlayedOnly(false)
+                  setWithCoverOnly(false)
+                }}
+                className="ml-auto px-2.5 py-1 rounded-md text-slate-400 hover:text-white hover:bg-white/5"
+              >
+                Limpar
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Tag filter row (hidden if no tags exist) */}
         {tagsWithCounts.length > 0 && (
@@ -407,6 +500,22 @@ function chipClass(active: boolean): string {
       ? 'bg-accent/15 text-accent border-accent'
       : 'bg-white/[0.02] text-slate-300 border-white/5 hover:bg-white/5 hover:text-white'
   ].join(' ')
+}
+
+function matchesSizeFilter(sizeBytes: number, sizeFilter: SizeFilter): boolean {
+  const gb = sizeBytes / (1024 ** 3)
+  switch (sizeFilter) {
+    case 'all':
+      return true
+    case 'lt1gb':
+      return gb <= 1
+    case '1to10gb':
+      return gb > 1 && gb <= 10
+    case '10to50gb':
+      return gb > 10 && gb <= 50
+    case 'gt50gb':
+      return gb > 50
+  }
 }
 
 function splitRootInput(value: string): string[] {

@@ -21,6 +21,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Sparkles,
   SkipBack,
   SkipForward,
   Star,
@@ -42,7 +43,9 @@ import type {
   MediaSubtitle,
   MediaWatchRecord,
   MediaStreamingProvider,
-  MediaStreamingProviderId
+  MediaStreamingProviderId,
+  StreamingPairingRecord,
+  StreamingTrendingItem
 } from '@shared/types'
 
 type Tab = 'library' | 'watched' | 'catalog' | 'streaming'
@@ -174,6 +177,22 @@ export default function Cinema(): JSX.Element {
     setItems((prev) => prev.map((item) => (item.id === itemId ? result : item)))
   }
 
+  async function removeFromLibrary(itemId: string): Promise<void> {
+    const item = items.find((entry) => entry.id === itemId)
+    if (!item) return
+    const ok = window.confirm(
+      `Remover "${item.title}" da biblioteca?\n\nIsso só apaga a entrada — o arquivo permanece no disco (a menos que esteja em downloads gerenciados pelo GameHub).`
+    )
+    if (!ok) return
+    const result = await window.api.media.removeFromLibrary(itemId, true)
+    if ('error' in result) {
+      setMessage(result.error)
+      return
+    }
+    setItems((prev) => prev.filter((entry) => entry.id !== itemId))
+    setMessage(result.deletedFile ? 'Removido da biblioteca e excluído do disco.' : 'Removido da biblioteca.')
+  }
+
   async function markWatched(itemId: string, completed: boolean): Promise<void> {
     const result = await window.api.media.setWatched(itemId, completed)
     if ('error' in result) {
@@ -275,6 +294,7 @@ export default function Cinema(): JSX.Element {
             onToggleFavorite={toggleFavorite}
             onMarkWatched={markWatched}
             onDismissFromContinue={dismissFromContinue}
+            onRemove={removeFromLibrary}
           />
         ) : tab === 'watched' ? (
           <WatchedView records={watched} onExport={exportWatched} />
@@ -562,18 +582,165 @@ function StreamingView({
           Nenhuma fonte de streaming ativa. Ative o Prime Video em Fontes de cinema.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <>
           {enabledProviders.map((provider) => (
-            <StreamingProviderCard
-              key={provider.id}
-              provider={provider}
-              query={query}
-              onToggle={() => onProviderChange(provider.id, { enabled: !provider.enabled })}
-            />
+            <StreamingTrendingCarousel key={`trend-${provider.id}`} providerId={provider.id} providerName={provider.name} />
           ))}
-        </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {enabledProviders.map((provider) => (
+              <StreamingProviderCard
+                key={provider.id}
+                provider={provider}
+                query={query}
+                onToggle={() => onProviderChange(provider.id, { enabled: !provider.enabled })}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
+  )
+}
+
+function DevicePairingPanel({ provider }: { provider: MediaStreamingProvider }): JSX.Element {
+  const [pairing, setPairing] = useState<StreamingPairingRecord | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void window.api.media.streamingPairing(provider.id).then((rec) => {
+      if (alive) setPairing(rec)
+    })
+    return () => {
+      alive = false
+    }
+  }, [provider.id])
+
+  async function regenerate(): Promise<void> {
+    setBusy(true)
+    const next = await window.api.media.streamingPairing(provider.id, true)
+    setPairing(next)
+    setBusy(false)
+  }
+
+  async function confirm(): Promise<void> {
+    setBusy(true)
+    const next = await window.api.media.streamingConfirmPaired(provider.id)
+    if (next) setPairing(next)
+    setBusy(false)
+  }
+
+  if (!pairing) return <></>
+  return (
+    <div className="mt-5 rounded-lg border border-white/10 bg-black/40 p-4">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.28em] text-cyan-200">
+        <MonitorPlay className="h-3 w-3" /> Pareamento de dispositivo
+      </div>
+      {pairing.status === 'paired' ? (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-emerald-300 font-semibold text-sm flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" /> Vinculado
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              Pareado em {pairing.pairedAt ? new Date(pairing.pairedAt).toLocaleString() : '—'}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={regenerate}
+            className="text-[11px] rounded-md bg-white/5 hover:bg-white/10 px-3 py-1.5 text-slate-200"
+          >
+            Refazer pareamento
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-[11px] text-slate-300 mb-1.5">Código GameHub</div>
+              <div className="font-mono text-3xl font-bold tracking-[0.4em] text-amber-300">
+                {pairing.code.slice(0, 3)}-{pairing.code.slice(3)}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 md:items-end">
+              <button
+                type="button"
+                onClick={() => openTrustedStreamingUrl(provider.activationUrl)}
+                className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-xs font-semibold text-ink-950"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Abrir primevideo.com/mytv
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={confirm}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-400 px-3 py-2 text-xs font-semibold text-ink-950 disabled:opacity-50"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Já registrei
+              </button>
+            </div>
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+            Cole esse código em <span className="font-mono">primevideo.com/mytv</span>. Ao confirmar,
+            o GameHub passa a abrir os títulos do Prime na sessão logada do navegador integrado.
+            Refazer pareamento gera um novo código a qualquer momento.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function StreamingTrendingCarousel({
+  providerId,
+  providerName
+}: {
+  providerId: string
+  providerName: string
+}): JSX.Element | null {
+  const [items, setItems] = useState<StreamingTrendingItem[]>([])
+  useEffect(() => {
+    let alive = true
+    void window.api.media.streamingTrending(providerId).then((list) => {
+      if (alive) setItems(list)
+    })
+    return () => {
+      alive = false
+    }
+  }, [providerId])
+  if (items.length === 0) return null
+  return (
+    <section className="rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.28em] text-accent">
+        <Sparkles className="h-3 w-3" /> Em alta no {providerName}
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {items.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            onClick={() => void window.api.system.openExternal(item.url)}
+            className="group w-44 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.03] text-left hover:border-accent/60"
+          >
+            <div className="aspect-[2/3] w-full bg-gradient-to-br from-slate-800 to-ink-950">
+              {item.cover ? (
+                <img src={item.cover} alt={item.title} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center p-3 text-center font-display text-sm font-bold text-slate-300">
+                  {item.title}
+                </div>
+              )}
+            </div>
+            <div className="p-2">
+              <div className="line-clamp-1 text-sm font-semibold text-white">{item.title}</div>
+              {item.year && <div className="text-[11px] text-slate-500">{item.year}</div>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -600,6 +767,7 @@ function StreamingProviderCard({
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">
               Use sua assinatura no ambiente oficial. O GameHub apenas abre a pagina, sem capturar credenciais.
             </p>
+            <DevicePairingPanel provider={provider} />
           </div>
           <div className="mt-6 flex flex-wrap gap-2">
             <button
@@ -647,7 +815,8 @@ function LibraryView({
   onPlay,
   onToggleFavorite,
   onMarkWatched,
-  onDismissFromContinue
+  onDismissFromContinue,
+  onRemove
 }: {
   items: MediaItem[]
   watched: MediaWatchRecord[]
@@ -657,6 +826,7 @@ function LibraryView({
   onToggleFavorite: (id: string) => void
   onMarkWatched: (id: string, completed: boolean) => void
   onDismissFromContinue: (id: string) => void
+  onRemove: (id: string) => void
 }): JSX.Element {
   if (items.length === 0) {
     return (
@@ -747,10 +917,11 @@ function LibraryView({
         onToggleFavorite={() => onToggleFavorite(item.id)}
         onMarkWatched={(completed) => onMarkWatched(item.id, completed)}
         onDismissFromContinue={() => onDismissFromContinue(item.id)}
+        onRemove={() => onRemove(item.id)}
         showDismiss={opts?.showDismiss}
       />
     ),
-    [watchedById, onHover, onPlay, onToggleFavorite, onMarkWatched, onDismissFromContinue]
+    [watchedById, onHover, onPlay, onToggleFavorite, onMarkWatched, onDismissFromContinue, onRemove]
   )
 
   return (
@@ -1348,6 +1519,7 @@ function MediaCard({
   onToggleFavorite,
   onMarkWatched,
   onDismissFromContinue,
+  onRemove,
   showDismiss = false
 }: {
   item: MediaItem
@@ -1357,6 +1529,7 @@ function MediaCard({
   onToggleFavorite?: () => void
   onMarkWatched?: (completed: boolean) => void
   onDismissFromContinue?: () => void
+  onRemove?: () => void
   showDismiss?: boolean
 }): JSX.Element {
   const completed = record?.completed === true
@@ -1450,6 +1623,16 @@ function MediaCard({
                   className="rounded-md bg-black/70 p-1.5 text-slate-100 backdrop-blur-md transition hover:bg-rose-500/85"
                 >
                   <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {onRemove && (
+                <button
+                  type="button"
+                  onClick={stopAnd(onRemove)}
+                  title="Excluir da biblioteca"
+                  className="rounded-md bg-black/70 p-1.5 text-slate-100 backdrop-blur-md transition hover:bg-rose-500/85"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
@@ -1616,6 +1799,7 @@ function CinemaPlayer({
   const [hudVisible, setHudVisible] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [transcoding, setTranscoding] = useState(false)
   const [paused, setPaused] = useState(false)
   const [muted, setMuted] = useState(false)
   const [volume, setVolume] = useState(0.86)
@@ -1811,6 +1995,7 @@ function CinemaPlayer({
   useEffect(() => {
     setLoading(true)
     setError(null)
+    setTranscoding(false)
     setPaused(false)
     setCurrentTime(0)
     setDuration(0)
@@ -1943,7 +2128,11 @@ function CinemaPlayer({
       <video
         ref={videoRef}
         data-cinema-video
-        src={`gh-media://item/${encodeURIComponent(activeItem.id)}`}
+        src={
+          transcoding
+            ? `gh-media://item/${encodeURIComponent(activeItem.id)}?transcode=full`
+            : `gh-media://item/${encodeURIComponent(activeItem.id)}`
+        }
         autoPlay
         poster={activeItem.banner ?? activeItem.cover}
         muted={muted}
@@ -1996,8 +2185,22 @@ function CinemaPlayer({
           revealHud(true)
         }}
         onError={() => {
+          // First failure → re-arm with ?transcode=full so ffmpeg-static
+          // remuxes/reencodes to H.264 + AAC (universally playable). Only show
+          // the "external player" fallback if the transcoded source ALSO
+          // errors — at that point ffmpeg is either missing or the file is
+          // truly broken.
+          if (!transcoding) {
+            setTranscoding(true)
+            setLoading(true)
+            setError(null)
+            showCenterHint('Convertendo formato para reprodução interna...')
+            return
+          }
           setLoading(false)
-          setError('Nao foi possivel reproduzir este arquivo no player interno.')
+          setError(
+            'Não foi possível transcodificar este arquivo. Tente abrir no player do sistema.'
+          )
           revealHud(true)
         }}
         onClick={togglePlayback}

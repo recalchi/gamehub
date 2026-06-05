@@ -27,7 +27,6 @@ import {
   installDownloadedUpdate
 } from '@main/core/updater'
 import { applyBackup, exportBackup, previewBackup } from '@main/core/backup'
-import { archiveAndRemoveGame, listJourneyRecords, upsertJourneyRecord } from '@main/core/journey'
 import { addManualGame, importSteamGames, removeGame, type ManualGameInput } from '@main/core/manualGames'
 import { importEpicGames } from '@main/core/epic'
 import {
@@ -45,16 +44,23 @@ import {
   startMediaDownload,
   toggleMediaFavorite,
   setMediaWatchedState,
-  clearMediaWatch
+  clearMediaWatch,
+  removeMediaFromLibrary
 } from '@main/core/cinema'
 import { runHealthCheck, cleanOrphans } from '@main/core/health'
 import { startDownload, cancelDownload, type StartDownloadInput } from '@main/core/downloads'
 import { canAutoInstall, installEmulator } from '@main/core/autoInstall'
 import { collectControllerDiagnostics } from '@main/core/controllers'
-import { attachPerformanceMonitor, latestPerformanceReport, latestPerformanceSample } from '@main/core/performance'
+import {
+  attachPerformanceMonitor,
+  latestPerformanceReport,
+  latestPerformanceSample
+} from '@main/core/performance'
+import { listPerfSessions, readPerfSession } from '@main/core/performance-log'
 import { discordRpcStatus, discordRpcValidate } from '@main/core/discordRpc'
 import { listInstalledMods, listModCatalog, startModDownload } from '@main/core/modCatalog'
 import { achievementDetail, listAchievementSummaries } from '@main/core/achievements'
+import { archiveAndRemoveGame, listJourneyRecords, upsertJourneyFromGame } from '@main/core/journey'
 import { PLATFORMS } from '@shared/platforms'
 import { EMULATORS } from '@shared/emulators'
 import {
@@ -71,7 +77,8 @@ import type {
   DisplayTarget,
   EmulatorId,
   Game,
-  GameJourneyInput,
+  GameArchiveRemoveInput,
+  GameJourneyUpsertInput,
   GameStatus,
   ModDownloadInput,
   PlatformId
@@ -228,10 +235,35 @@ export function registerIpcHandlers(): void {
       emulatorRoots: settings.emulatorRoots,
       fresh: opts?.fresh ?? false
     })
+    // Auto-detection of Riot/Epic launchers — both work from local files
+    // (Riot install folders, Epic manifests under ProgramData) so a manual
+    // import step shouldn't be needed. Wrapped in try/catch so a launcher
+    // missing or quirky doesn't disrupt the scan that did work.
+    try {
+      const { importRiotGames } = await import('@main/core/riot')
+      const riot = await importRiotGames()
+      if (riot.added + riot.updated > 0) {
+        log.info('ipc', `library.scan auto-riot: +${riot.added} added, ${riot.updated} updated`)
+      }
+    } catch (err) {
+      log.warn('ipc', `auto Riot detection failed: ${String(err)}`)
+    }
+    try {
+      if (settings.epic.enabled) {
+        const epic = await importEpicGames()
+        if (epic.found > 0) {
+          log.info('ipc', `library.scan auto-epic: ${epic.found} found, +${epic.added} added, ${epic.updated} updated`)
+        }
+      }
+    } catch (err) {
+      log.warn('ipc', `auto Epic detection failed: ${String(err)}`)
+    }
     log.info('ipc', `library.scan complete: ${r.games.length} games`)
     // Post-scan diagnostic — log which games have resolvable save folders.
     probeSaveLocations()
-    return r
+    // Return the latest library snapshot so the renderer sees Riot/Epic
+    // entries from the same call.
+    return { ...r, games: libraryStore.load().games }
   })
 
   ipcMain.handle(IPC.library.get, (_e, id: string) => {
@@ -280,9 +312,10 @@ export function registerIpcHandlers(): void {
     return removeGame(id)
   })
 
-  ipcMain.handle(IPC.library.archiveRemove, (_e, input: GameJourneyInput) =>
-    archiveAndRemoveGame(input)
-  )
+  ipcMain.handle(IPC.library.archiveRemove, (_e, input: GameArchiveRemoveInput) => {
+    log.info('ipc', `library.archive-remove ${input.gameId}`)
+    return archiveAndRemoveGame({ ...input, removeFromLibrary: true })
+  })
 
   ipcMain.handle(IPC.system.importSteam, async () => {
     log.info('ipc', 'system.importSteam')
@@ -315,6 +348,45 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.system.crashStats, async (_e, gameId: string) => {
     const { crashStats } = await import('@main/core/crashTracker')
     return crashStats(gameId)
+  })
+
+  ipcMain.handle(IPC.system.relaunchAsAdmin, async () => {
+    // Relaunch the running app with elevation. We use PowerShell
+    // `Start-Process -Verb RunAs` which triggers the real Windows UAC prompt.
+    // After spawning the elevated child, we quit the current (non-elevated)
+    // instance so they don't run in parallel and fight over windowing.
+    if (process.platform !== 'win32') {
+      return { error: 'Disponível apenas no Windows.' }
+    }
+    try {
+      const { spawn } = await import('node:child_process')
+      const exe = process.execPath
+      // Build argv (skip the exe path which is argv[0]) so the new instance
+      // gets the same flags. Quote each arg defensively.
+      const args = process.argv
+        .slice(1)
+        .map((a) => `'${a.replace(/'/g, "''")}'`)
+        .join(',')
+      const psCmd =
+        args.length > 0
+          ? `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -ArgumentList ${args} -Verb RunAs`
+          : `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -Verb RunAs`
+      const child = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+        { windowsHide: true, detached: true, stdio: 'ignore' }
+      )
+      child.unref()
+      // Give Windows a beat to show the UAC dialog before we exit; otherwise
+      // closing too fast can race with the consent broker.
+      setTimeout(() => {
+        const { app } = require('electron') as typeof import('electron')
+        app.quit()
+      }, 800)
+      return { ok: true } as const
+    } catch (err) {
+      return { error: String(err) }
+    }
   })
 
   ipcMain.handle(IPC.system.readCrashLog, async (_e, logPath: string) => {
@@ -444,6 +516,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.media.clearWatch, (_e, id: string) => clearMediaWatch(id))
   ipcMain.handle(IPC.media.exportWatched, () => exportWatchedMediaBackup())
   ipcMain.handle(IPC.media.refreshArtwork, (_e, ids?: string[]) => refreshMediaArtwork(ids))
+  ipcMain.handle(IPC.media.removeFromLibrary, (_e, id: string, deleteFile?: boolean) =>
+    removeMediaFromLibrary(id, { deleteFile })
+  )
+  ipcMain.handle(IPC.media.streamingTrending, async (_e, providerId: string) => {
+    const { fetchProviderTrending } = await import('@main/core/streaming/providers')
+    return fetchProviderTrending(providerId)
+  })
+  ipcMain.handle(IPC.media.streamingPairing, async (_e, providerId: string, regenerate?: boolean) => {
+    const { getOrCreatePairing, regeneratePairing } = await import('@main/core/streaming/pairing')
+    return regenerate ? regeneratePairing(providerId) : getOrCreatePairing(providerId)
+  })
+  ipcMain.handle(IPC.media.streamingConfirmPaired, async (_e, providerId: string) => {
+    const { confirmPaired } = await import('@main/core/streaming/pairing')
+    return confirmPaired(providerId)
+  })
 
   // ----- Emulators -----
   ipcMain.handle(IPC.emulator.list, () => libraryStore.load().emulators)
@@ -554,14 +641,38 @@ export function registerIpcHandlers(): void {
     latestPerformanceReport(gameId)
   )
 
+  ipcMain.handle(IPC.performance.sessions, (_e, gameId: string, limit?: number) =>
+    listPerfSessions(gameId, limit ?? 10)
+  )
+  ipcMain.handle(IPC.performance.session, (_e, gameId: string, sessionId: string) =>
+    readPerfSession(gameId, sessionId)
+  )
+  ipcMain.handle(IPC.performance.rtssStatus, async () => {
+    const { rtssStatus } = await import('@main/core/rtss')
+    return rtssStatus()
+  })
+  ipcMain.handle(IPC.performance.rtssEnsure, async () => {
+    const { ensureRtssRunning } = await import('@main/core/rtss')
+    return ensureRtssRunning()
+  })
+
   ipcMain.handle(IPC.discord.status, () => discordRpcStatus())
   ipcMain.handle(IPC.discord.validate, () => discordRpcValidate())
 
   ipcMain.handle(IPC.achievements.summaries, () => listAchievementSummaries())
   ipcMain.handle(IPC.achievements.game, (_e, gameId: string) => achievementDetail(gameId))
-
+  ipcMain.handle(IPC.achievements.progress, async (_e, gameId: string) => {
+    const { listUnlocked } = await import('@main/core/achievements/progress')
+    return listUnlocked(gameId)
+  })
+  ipcMain.handle(IPC.achievements.toggle, async (_e, gameId: string, achievementId: string, unlocked: boolean) => {
+    const { toggleAchievement } = await import('@main/core/achievements/progress')
+    return toggleAchievement(gameId, achievementId, unlocked)
+  })
   ipcMain.handle(IPC.journey.list, () => listJourneyRecords())
-  ipcMain.handle(IPC.journey.upsert, (_e, input: GameJourneyInput) => upsertJourneyRecord(input))
+  ipcMain.handle(IPC.journey.upsert, (_e, input: GameJourneyUpsertInput) =>
+    upsertJourneyFromGame(input)
+  )
 
   // ----- Saves -----
   ipcMain.handle(IPC.saves.location, (_e, gameId: string) => describeSaveLocation(gameId))

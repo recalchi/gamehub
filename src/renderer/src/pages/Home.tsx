@@ -46,6 +46,24 @@ export default function Home(): JSX.Element {
         .slice(0, 12),
     [games]
   )
+  // PC standalone games — excludes Steam/Epic/Riot (those have their own shelf via
+  // platform flags). PC and managed-store games must stay isolated per project rule.
+  const pcGames = useMemo(
+    () =>
+      games
+        .filter(
+          (g) =>
+            g.platform === 'pc' &&
+            !g.path.startsWith('steam://') &&
+            !g.path.startsWith('epic://') &&
+            !g.path.startsWith('riot://') &&
+            !g.flags?.includes('steam') &&
+            !g.flags?.includes('epic') &&
+            !g.flags?.includes('riot')
+        )
+        .slice(0, 12),
+    [games]
+  )
   const platformsWithGames = useMemo(
     () =>
       Array.from(new Set(games.map((g) => g.platform))).filter(
@@ -86,12 +104,15 @@ export default function Home(): JSX.Element {
             <Shelf title="Favoritos" games={favorites} accent="#f87171" />
           )}
           {steamGames.length > 0 && (
-            <Shelf title="Steam / PC" games={steamGames} accent="#66c0f4" />
+            <Shelf title="Steam" games={steamGames} accent="#66c0f4" />
           )}
           {platformsWithGames.slice(0, 6).map((p) => {
             const list = games.filter((g) => g.platform === p).slice(0, 12)
             return <Shelf key={p} title={PLATFORMS[p].name} games={list} accent={PLATFORMS[p].color} />
           })}
+          {pcGames.length > 0 && (
+            <Shelf title="Windows / PC" games={pcGames} accent="#a78bfa" />
+          )}
           {suggestions.length > 0 && <SuggestionShelf entries={suggestions} />}
         </div>
       )}

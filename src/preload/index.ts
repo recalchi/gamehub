@@ -6,6 +6,9 @@ import type {
   AutoSubtitleResult,
   GameAchievementDetail,
   GameAchievementSummary,
+  GameArchiveRemoveInput,
+  GameJourneyRecord,
+  GameJourneyUpsertInput,
   AppInfo,
   AppSettings,
   AutoInstallProgress,
@@ -21,8 +24,6 @@ import type {
   EmulatorId,
   Game,
   HealthReport,
-  GameJourneyInput,
-  GameJourneyRecord,
   LaunchFailedEvent,
   LaunchFallbackEvent,
   LaunchResult,
@@ -41,10 +42,16 @@ import type {
   ModInstallRecord,
   PerformanceReport,
   PerformanceSample,
+  PerfSessionSummary,
+  PerfSessionDetail,
+  RtssEnsureResult,
+  RtssStatus,
   PlatformId,
   SaveSnapshot,
   ScanProgress,
   ScanResult,
+  StreamingPairingRecord,
+  StreamingTrendingItem,
   UpdateInfo
 } from '@shared/types'
 
@@ -77,8 +84,8 @@ export interface GameHubApi {
     }) => Promise<Game | { error: string }>
     remove: (id: string) => Promise<{ ok: true } | { error: string }>
     archiveRemove: (
-      input: GameJourneyInput
-    ) => Promise<{ ok: true; record: GameJourneyRecord } | { error: string }>
+      input: GameArchiveRemoveInput
+    ) => Promise<{ ok: true; record: GameJourneyRecord; saveWarning?: string } | { error: string }>
     healthCheck: () => Promise<HealthReport>
     cleanOrphans: () => Promise<{ removed: number; bytes: number }>
     extractArchive: (
@@ -120,10 +127,13 @@ export interface GameHubApi {
   }
   performance: {
     latest: (gameId: string) => Promise<PerformanceSample | null>
-    attach: (gameId: string) => Promise<PerformanceSample | null>
     report: (gameId: string) => Promise<PerformanceReport | null>
     onSample: (cb: (sample: PerformanceSample) => void) => () => void
     onReport: (cb: (report: PerformanceReport) => void) => () => void
+    sessions: (gameId: string, limit?: number) => Promise<PerfSessionSummary[]>
+    session: (gameId: string, sessionId: string) => Promise<PerfSessionDetail | null>
+    rtssStatus: () => Promise<RtssStatus>
+    rtssEnsure: () => Promise<RtssEnsureResult>
   }
   discord: {
     status: () => Promise<DiscordRpcStatus>
@@ -132,10 +142,14 @@ export interface GameHubApi {
   achievements: {
     summaries: () => Promise<GameAchievementSummary[]>
     game: (gameId: string) => Promise<GameAchievementDetail | null>
+    progress: (gameId: string) => Promise<Record<string, string>>
+    toggle: (gameId: string, achievementId: string, unlocked: boolean) => Promise<Record<string, string>>
   }
   journey: {
     list: () => Promise<GameJourneyRecord[]>
-    upsert: (input: GameJourneyInput) => Promise<GameJourneyRecord | { error: string }>
+    upsert: (
+      input: GameJourneyUpsertInput
+    ) => Promise<{ ok: true; record: GameJourneyRecord; saveWarning?: string } | { error: string }>
   }
   saves: {
     location: (gameId: string) => Promise<{ available: boolean; path?: string; label?: string }>
@@ -150,6 +164,7 @@ export interface GameHubApi {
       title: string
       platform: PlatformId
       destinationDir?: string
+      checksumSha256?: string
     }) => Promise<{ id: string } | { error: string }>
     cancel: (id: string) => Promise<{ ok: boolean }>
     onProgress: (cb: (p: DownloadProgress) => void) => () => void
@@ -179,6 +194,13 @@ export interface GameHubApi {
     clearWatch: (id: string) => Promise<{ ok: true } | { error: string }>
     exportWatched: () => Promise<{ ok: true; path: string } | { error: string }>
     refreshArtwork: (ids?: string[]) => Promise<{ updated: number; skipped: number }>
+    removeFromLibrary: (
+      id: string,
+      deleteFile?: boolean
+    ) => Promise<{ ok: true; deletedFile: boolean } | { error: string }>
+    streamingTrending: (providerId: string) => Promise<StreamingTrendingItem[]>
+    streamingPairing: (providerId: string, regenerate?: boolean) => Promise<StreamingPairingRecord>
+    streamingConfirmPaired: (providerId: string) => Promise<StreamingPairingRecord | null>
     onProgress: (cb: (p: MediaDownloadProgress) => void) => () => void
   }
   system: {
@@ -233,6 +255,7 @@ export interface GameHubApi {
     crashStats: (gameId: string) => Promise<CrashStats>
     readCrashLog: (logPath: string) => Promise<{ content: string } | { error: string }>
     onCrashRecorded: (cb: (r: CrashReport) => void) => () => void
+    relaunchAsAdmin: () => Promise<{ ok: true } | { error: string }>
   }
 }
 
@@ -312,7 +335,6 @@ const api: GameHubApi = {
   },
   performance: {
     latest: (gameId) => ipcRenderer.invoke(IPC.performance.latest, gameId),
-    attach: (gameId) => ipcRenderer.invoke(IPC.performance.attach, gameId),
     report: (gameId) => ipcRenderer.invoke(IPC.performance.report, gameId),
     onSample: (cb) => {
       const listener = (_e: unknown, sample: PerformanceSample): void => cb(sample)
@@ -323,7 +345,11 @@ const api: GameHubApi = {
       const listener = (_e: unknown, report: PerformanceReport): void => cb(report)
       ipcRenderer.on(IPC.performance.reportReady, listener)
       return () => ipcRenderer.removeListener(IPC.performance.reportReady, listener)
-    }
+    },
+    sessions: (gameId, limit) => ipcRenderer.invoke(IPC.performance.sessions, gameId, limit),
+    session: (gameId, sessionId) => ipcRenderer.invoke(IPC.performance.session, gameId, sessionId),
+    rtssStatus: () => ipcRenderer.invoke(IPC.performance.rtssStatus),
+    rtssEnsure: () => ipcRenderer.invoke(IPC.performance.rtssEnsure)
   },
   discord: {
     status: () => ipcRenderer.invoke(IPC.discord.status),
@@ -331,7 +357,10 @@ const api: GameHubApi = {
   },
   achievements: {
     summaries: () => ipcRenderer.invoke(IPC.achievements.summaries),
-    game: (gameId) => ipcRenderer.invoke(IPC.achievements.game, gameId)
+    game: (gameId) => ipcRenderer.invoke(IPC.achievements.game, gameId),
+    progress: (gameId) => ipcRenderer.invoke(IPC.achievements.progress, gameId),
+    toggle: (gameId, achievementId, unlocked) =>
+      ipcRenderer.invoke(IPC.achievements.toggle, gameId, achievementId, unlocked)
   },
   journey: {
     list: () => ipcRenderer.invoke(IPC.journey.list),
@@ -382,6 +411,14 @@ const api: GameHubApi = {
     clearWatch: (id) => ipcRenderer.invoke(IPC.media.clearWatch, id),
     exportWatched: () => ipcRenderer.invoke(IPC.media.exportWatched),
     refreshArtwork: (ids) => ipcRenderer.invoke(IPC.media.refreshArtwork, ids),
+    removeFromLibrary: (id, deleteFile) =>
+      ipcRenderer.invoke(IPC.media.removeFromLibrary, id, deleteFile ?? false),
+    streamingTrending: (providerId) =>
+      ipcRenderer.invoke(IPC.media.streamingTrending, providerId),
+    streamingPairing: (providerId, regenerate) =>
+      ipcRenderer.invoke(IPC.media.streamingPairing, providerId, regenerate ?? false),
+    streamingConfirmPaired: (providerId) =>
+      ipcRenderer.invoke(IPC.media.streamingConfirmPaired, providerId),
     onProgress: (cb) => {
       const listener = (_e: unknown, p: MediaDownloadProgress): void => cb(p)
       ipcRenderer.on(IPC.media.progress, listener)
@@ -436,7 +473,8 @@ const api: GameHubApi = {
       const listener = (_e: unknown, r: CrashReport): void => cb(r)
       ipcRenderer.on(IPC.system.crashRecorded, listener)
       return () => ipcRenderer.removeListener(IPC.system.crashRecorded, listener)
-    }
+    },
+    relaunchAsAdmin: () => ipcRenderer.invoke(IPC.system.relaunchAsAdmin)
   }
 }
 

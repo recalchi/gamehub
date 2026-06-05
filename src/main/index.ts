@@ -32,6 +32,21 @@ import ffmpegStatic from 'ffmpeg-static'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const isMediaPlaybackSmoke = process.argv.includes('--smoke-media-playback')
+
+// Brand the processes — without this, Windows Task Manager shows "Electron"
+// for every process the app spawns, which looks like junk. We set both the
+// Electron-side `name` (used in About dialogs, app-data paths fallback) and
+// the OS-level `process.title` so tasklist/Task Manager show "GameHub".
+//
+// AppUserModelId controls taskbar grouping + jump lists. Setting it early
+// ensures Windows associates our shortcut + running window correctly.
+try {
+  app.setName('GameHub')
+  app.setAppUserModelId('com.recalchi.gamehub')
+  process.title = 'GameHub'
+} catch {
+  // setName/setAppUserModelId may fail in some test envs — non-fatal.
+}
 const COMPAT_AUDIO_EXTENSIONS = new Set(['.mkv', '.avi', '.wmv', '.mpg', '.mpeg'])
 const compatMediaJobs = new Map<string, Promise<string | null>>()
 
@@ -74,7 +89,15 @@ function registerAssetProtocol(): void {
       const kind = url.hostname
       const filename = decodeURIComponent(url.pathname.replace(/^\//, ''))
       const root =
-        kind === 'cover' ? PATHS.covers : kind === 'banner' ? PATHS.banners : null
+        kind === 'cover'
+          ? PATHS.covers
+          : kind === 'banner'
+            ? PATHS.banners
+            : kind === 'journey-cover'
+              ? PATHS.journeyCovers
+              : kind === 'journey-banner'
+                ? PATHS.journeyBanners
+                : null
       if (!root) return new Response(null, { status: 404 })
       const filePath = join(root, filename)
       // Reject anything that resolves outside the intended root
@@ -117,8 +140,12 @@ async function runFfmpeg(args: string[]): Promise<{ ok: boolean; stderr: string 
   })
 }
 
-async function ensureCompatMediaPath(itemId: string, sourcePath: string): Promise<string | null> {
-  if (!needsCompatAudio(sourcePath)) return null
+async function ensureCompatMediaPath(
+  itemId: string,
+  sourcePath: string,
+  options: { force?: boolean } = {}
+): Promise<string | null> {
+  if (!options.force && !needsCompatAudio(sourcePath)) return null
   const bin = ffmpegBinary()
   if (!bin) {
     log.warn('cinema', `ffmpeg nao disponivel para compatibilidade interna: ${sourcePath}`)
@@ -143,10 +170,29 @@ async function ensureCompatMediaPath(itemId: string, sourcePath: string): Promis
     }
 
     const base = safeFileSlug(basename(sourcePath, extname(sourcePath)))
-    const outPath = join(outDir, `${base}-${itemId}-${Math.floor(sourceStat.mtimeMs)}.mp4`)
+    const suffix = options.force ? 'force' : 'auto'
+    const outPath = join(outDir, `${base}-${itemId}-${Math.floor(sourceStat.mtimeMs)}-${suffix}.mp4`)
     if (existsSync(outPath)) return outPath
 
-    log.info('cinema', `compat transcode started: ${basename(sourcePath)} -> ${basename(outPath)}`)
+    log.info('cinema', `compat transcode started (${suffix}): ${basename(sourcePath)} -> ${basename(outPath)}`)
+    // Force mode: skip the "copy video first" attempt because we already know
+    // the browser can't play it as-is. Go straight to full H.264 + AAC.
+    if (options.force) {
+      const r = await runFfmpeg([
+        '-y', '-i', sourcePath,
+        '-map', '0:v:0', '-map', '0:a:0?',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-c:a', 'aac', '-ac', '2', '-b:a', '192k',
+        '-movflags', '+faststart',
+        outPath
+      ])
+      if (!r.ok || !existsSync(outPath)) {
+        log.warn('cinema', `force transcode falhou para ${sourcePath}: ${r.stderr || 'erro'}`)
+        return null
+      }
+      log.info('cinema', `force transcode ready: ${outPath}`)
+      return outPath
+    }
     const copyVideoFirst = await runFfmpeg([
       '-y',
       '-i',
@@ -258,7 +304,8 @@ function registerMediaProtocol(): void {
       if (url.hostname !== 'item' || !id) return new Response(null, { status: 404 })
       const item = mediaStore.load().items.find((entry) => entry.id === id)
       if (!item || !existsSync(item.path)) return new Response(null, { status: 404 })
-      const compatPath = await ensureCompatMediaPath(item.id, item.path)
+      const force = url.searchParams.get('transcode') === 'full'
+      const compatPath = await ensureCompatMediaPath(item.id, item.path, { force })
       return streamFileResponse(compatPath ?? item.path, request)
     } catch (err) {
       log.error('protocol', `gh-media handler failed: ${String(err)}`)
@@ -848,6 +895,15 @@ app.whenReady().then(async () => {
   registerAssetProtocol()
   registerMediaProtocol()
   registerIpcHandlers()
+  // Auto-attach perf monitor to games that are already running (Steam,
+  // desktop shortcut, etc.). Defensive: never let the watcher boot abort
+  // the rest of app startup.
+  try {
+    const { startProcessWatcher } = await import('./core/process-watcher')
+    startProcessWatcher()
+  } catch (err) {
+    log.warn('app', `process watcher failed to start: ${String(err)}`)
+  }
 
   if (process.argv.includes('--smoke-saves')) {
     const code = await runSmokeSaves()
@@ -1004,6 +1060,18 @@ app.on('before-quit', async () => {
   await unmountAll()
   const { discordRpcStop } = await import('./core/discordRpc')
   discordRpcStop()
+  try {
+    const { shutdownRtssDaemon } = await import('./core/rtss')
+    shutdownRtssDaemon()
+  } catch {
+    // best-effort
+  }
+  try {
+    const { stopProcessWatcher } = await import('./core/process-watcher')
+    stopProcessWatcher()
+  } catch {
+    // best-effort
+  }
 })
 
 process.on('uncaughtException', (err) => log.error('app', 'uncaught', { err: String(err) }))

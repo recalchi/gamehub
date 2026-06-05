@@ -5,6 +5,8 @@ import type {
   AppSettings,
   DetectedEmulator,
   Game,
+  GameJourneyFile,
+  GameJourneyRecord,
   MediaItem,
   MediaLibraryFile,
   MediaWatchRecord,
@@ -255,11 +257,26 @@ export const mediaStore = {
     }
     return { ...raw, items }
   },
-  save(items: MediaItem[]): void {
+  save(items: MediaItem[], extra: { excludedPaths?: string[] } = {}): void {
+    const current = readJson<MediaLibraryFile>(PATHS.mediaLibraryFile, {
+      items: [],
+      updatedAt: new Date().toISOString()
+    })
     writeJson(PATHS.mediaLibraryFile, {
       items,
+      excludedPaths: extra.excludedPaths ?? current.excludedPaths ?? [],
       updatedAt: new Date().toISOString()
     } satisfies MediaLibraryFile)
+  },
+  exclude(path: string): void {
+    const data = this.load()
+    const set = new Set(data.excludedPaths ?? [])
+    set.add(path.toLowerCase())
+    this.save(data.items, { excludedPaths: Array.from(set) })
+  },
+  isExcluded(path: string): boolean {
+    const data = this.load()
+    return (data.excludedPaths ?? []).includes(path.toLowerCase())
   },
   patchItem(id: string, patch: Partial<MediaItem>): MediaItem | null {
     const data = this.load()
@@ -277,6 +294,13 @@ export const mediaStore = {
     else data.items[idx] = item
     this.save(data.items)
     return item
+  },
+  removeItem(id: string): boolean {
+    const data = this.load()
+    const next = data.items.filter((item) => item.id !== id)
+    if (next.length === data.items.length) return false
+    this.save(next)
+    return true
   }
 }
 
@@ -323,5 +347,43 @@ export const watchedMediaStore = {
     if (next.length === before) return false
     this.save(next)
     return true
+  }
+}
+
+export const journeyStore = {
+  load(): GameJourneyFile {
+    const raw = readJson<GameJourneyFile>(PATHS.journeyFile, {
+      records: [],
+      updatedAt: new Date().toISOString()
+    })
+    let dirty = false
+    const records = raw.records.map((record) => {
+      const cover = migrateAssetUrl(record.cover, 'cover')
+      const banner = migrateAssetUrl(record.banner, 'banner')
+      if (cover !== record.cover || banner !== record.banner) {
+        dirty = true
+        return { ...record, cover, banner }
+      }
+      return record
+    })
+    if (dirty) {
+      writeJson(PATHS.journeyFile, { ...raw, records, updatedAt: new Date().toISOString() })
+    }
+    return { ...raw, records }
+  },
+  save(records: GameJourneyRecord[]): void {
+    writeJson(PATHS.journeyFile, {
+      records,
+      updatedAt: new Date().toISOString()
+    } satisfies GameJourneyFile)
+  },
+  upsert(record: GameJourneyRecord): GameJourneyRecord {
+    const data = this.load()
+    const idx = data.records.findIndex((existing) => existing.gameId === record.gameId)
+    if (idx === -1) data.records.unshift(record)
+    else data.records[idx] = { ...data.records[idx], ...record, firstTrackedAt: data.records[idx].firstTrackedAt }
+    data.records.sort((a, b) => b.lastTrackedAt.localeCompare(a.lastTrackedAt))
+    this.save(data.records)
+    return idx === -1 ? record : data.records[idx]
   }
 }

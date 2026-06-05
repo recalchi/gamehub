@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs'
 import { copyFile, mkdir, readdir, stat, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import { PATHS } from './paths'
 import { addManualGame } from './manualGames'
@@ -21,6 +21,8 @@ export interface StartDownloadInput {
   platform: PlatformId
   /** destination directory; defaults to userData/downloads/<platform>/ */
   destinationDir?: string
+  /** Optional SHA-256 hash to verify after download completes. */
+  checksumSha256?: string
 }
 
 export interface DownloadProgress {
@@ -50,8 +52,10 @@ export interface DownloadProgress {
  * register the file as a manual game so it appears in the library
  * immediately.
  *
- * No resume / no concurrency limit / no checksum verify — those are
- * follow-up work. Good enough for grabbing a homebrew zip or demo ISO.
+ * Supports resume when a partial file exists and the server honors `Range`.
+ * Optional SHA-256 verification is supported via `checksumSha256`.
+ *
+ * Concurrency limiting is still follow-up work.
  */
 
 const active = new Map<string, { ctrl: AbortController; cancelled: boolean }>()
@@ -112,18 +116,29 @@ async function runDownload(
   })
 
   try {
-    const r = await fetch(input.url, { signal: ctrl.signal })
+    const existingBytes = await existingFileSize(filePath)
+    const headers = existingBytes > 0 ? { Range: `bytes=${existingBytes}-` } : undefined
+    const r = await fetch(input.url, { signal: ctrl.signal, headers })
     if (!r.ok || !r.body) {
       throw new Error(`HTTP ${r.status} ${r.statusText}`)
     }
-    const total = Number(r.headers.get('content-length')) || undefined
-    log.info('downloads', `${id}: starting ${input.url} → ${filePath} (total=${total ?? '?'})`)
+
+    const resumeAccepted = existingBytes > 0 && r.status === 206
+    const appendMode = resumeAccepted
+    const baseBytes = resumeAccepted ? existingBytes : 0
+    const lengthHeader = Number(r.headers.get('content-length')) || undefined
+    const total = lengthHeader !== undefined ? baseBytes + lengthHeader : undefined
+
+    log.info(
+      'downloads',
+      `${id}: starting ${input.url} → ${filePath} (resume=${resumeAccepted ? baseBytes : 0} bytes, total=${total ?? '?'})`
+    )
 
     const reader = r.body.getReader()
-    const stream = createWriteStream(filePath)
-    let received = 0
+    const stream = createWriteStream(filePath, appendMode ? { flags: 'a' } : undefined)
+    let received = baseBytes
     let lastEmit = 0
-    let lastBytes = 0
+    let lastBytes = baseBytes
     let lastTime = Date.now()
     let speed = 0
 
@@ -132,7 +147,7 @@ async function runDownload(
       if (done) break
       if (active.get(id)?.cancelled) {
         stream.close()
-        await unlink(filePath).catch(() => {})
+        // Keep partial bytes on cancel so the next start can resume.
         publish({
           id,
           url: input.url,
@@ -173,6 +188,16 @@ async function runDownload(
     })
 
     const finalStat = await stat(filePath)
+
+    if (input.checksumSha256) {
+      const expected = normalizeSha256(input.checksumSha256)
+      const actual = await sha256File(filePath)
+      if (expected !== actual) {
+        throw new Error(`Checksum SHA-256 divergente. Esperado ${expected}, obtido ${actual}.`)
+      }
+      log.info('downloads', `${id}: checksum ok (${actual})`)
+    }
+
     log.info('downloads', `${id}: done ${received} bytes`)
 
     // If the download is actually an archive (zip/7z), extract it and
@@ -248,6 +273,32 @@ async function runDownload(
       error: msg
     })
   }
+}
+
+async function existingFileSize(path: string): Promise<number> {
+  if (!existsSync(path)) return 0
+  try {
+    const st = await stat(path)
+    return st.isFile() ? st.size : 0
+  } catch {
+    return 0
+  }
+}
+
+function normalizeSha256(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-f0-9]/g, '')
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  const { createReadStream } = await import('node:fs')
+  await new Promise<void>((resolve, reject) => {
+    const rs = createReadStream(path)
+    rs.on('data', (chunk) => hash.update(chunk))
+    rs.on('end', () => resolve())
+    rs.on('error', reject)
+  })
+  return hash.digest('hex')
 }
 
 function publish(p: DownloadProgress): void {

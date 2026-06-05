@@ -643,10 +643,12 @@ function TextList({
  * elevated and we don't. The fix is for the user to relaunch GameHub admin.
  */
 function isNoSigPrivilegeIssue(rtss: RtssStatus): boolean {
-  if (rtss.diagnostic.shmStatus !== 'NO_SIG') return false
-  const d = rtss.diagnostic.shmDetail ?? ''
-  // sig=0x00000000 or sig=0xFFFFFFFF strongly indicates page-level access denial
-  return /sig=0x0+\b/i.test(d) || /sig=0xf{8}/i.test(d)
+  // NO_SIG means OpenFileMapping succeeded but the data read back wasn't the
+  // expected 'RTSS' signature. In practice this is always MIC denial: RTSS
+  // runs elevated, GameHub doesn't, and the kernel zeros our reads instead
+  // of failing the call outright. The earlier narrow sig=0x0 check missed
+  // cases where `detail` got overwritten by later err= entries.
+  return rtss.diagnostic.shmStatus === 'NO_SIG'
 }
 
 function formatMaybePercent(value?: number): string {

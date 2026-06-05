@@ -68,7 +68,7 @@ const HELPER_SRC = join(HELPER_DIR, 'rtss-probe.cs')
  * Bump this whenever HELPER_CS changes, so an existing cached exe gets
  * rebuilt. Without this you'd keep running the old probe forever.
  */
-const HELPER_VERSION = 4
+const HELPER_VERSION = 5
 const HELPER_VERSION_FILE = join(HELPER_DIR, 'version')
 
 const diagnostic: RtssStatus['diagnostic'] = {
@@ -199,8 +199,16 @@ export async function readRtss(): Promise<RtssEntry[]> {
     cache = { ts: now, entries }
     return entries
   } catch (err) {
+    // Helper may have crashed (Windows Defender, AV, or CLR exception) AFTER
+    // already printing useful diagnostic to stdout. execFileAsync rejects with
+    // an error that carries `stdout`/`stderr` from the child — recover those
+    // so the UI still gets shmStatus instead of just "Command failed".
+    const e = err as { stdout?: string; stderr?: string; message?: string }
+    if (typeof e?.stdout === 'string' && e.stdout.length > 0) {
+      parseEntries(e.stdout)
+    }
     diagnostic.lastProbeAt = new Date().toISOString()
-    diagnostic.lastProbeError = String(err)
+    diagnostic.lastProbeError = String(e?.message ?? err)
     log.debug?.('rtss', `probe failed: ${String(err)}`)
     return cache.entries
   }
@@ -272,9 +280,12 @@ export async function rtssStatus(): Promise<RtssStatus> {
   const taskListRunning = await processIsRunning('RTSS.exe')
   // Trigger probe in background, but don't await it.
   void readRtss().catch(() => undefined)
-  const running =
-    diagnostic.lastEntryCount > 0 ||
-    (taskListRunning && diagnostic.lastProbeError === undefined)
+  // RTSS is "running" if tasklist sees the exe — full stop. The probe error
+  // is independent of whether RTSS itself is alive: NO_SIG / Command failed
+  // both mean WE can't read SHM, not that RTSS is dead. Conflating them was
+  // what made the banner say "instalado mas não está rodando" while RTSS was
+  // clearly open on screen.
+  const running = diagnostic.lastEntryCount > 0 || taskListRunning
   return {
     installed: !!installPath,
     running,
@@ -397,7 +408,10 @@ class RtssProbe {
         int err = Marshal.GetLastWin32Error();
         if (detailParts.Length > 0) detailParts.Append(", ");
         detailParts.Append(mapName).Append(" err=").Append(err);
-        detail = detailParts.ToString();
+        // Only rebuild detail from err list if we haven't already captured a
+        // sig=0x... line (that's the smoking gun for MIC denial and we don't
+        // want a noisy err=2 trail to bury it).
+        if (!detail.StartsWith("sig=")) detail = detailParts.ToString();
         continue;
       }
       var view = MapViewOfFile(h, FILE_MAP_READ, 0, 0, UIntPtr.Zero);

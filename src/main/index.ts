@@ -296,6 +296,50 @@ function streamFileResponse(filePath: string, request: Request): Response {
   return new Response(Readable.toWeb(stream) as never, { status: 200, headers })
 }
 
+/**
+ * Live transcode pipe: spawn ffmpeg and stream fragmented MP4 straight to
+ * Chromium without waiting for the full file. Starts playing in ~1-2s instead
+ * of after a 10-30 min disk transcode.
+ *
+ * Trade-offs:
+ *   - No accurate seek (fragmented MP4 streamed live has no global moov).
+ *     Chromium can seek WITHIN the buffer but not jump to arbitrary times.
+ *   - One ffmpeg process per active viewer — fine for solo PC use.
+ */
+function streamTranscodePipe(sourcePath: string): Response | null {
+  const bin = ffmpegBinary()
+  if (!bin) return null
+  const ff = spawn(
+    bin,
+    [
+      '-i', sourcePath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-b:a', '160k',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+      'pipe:1'
+    ],
+    { windowsHide: true }
+  )
+  ff.stderr.on('data', (chunk) => {
+    // Surface ffmpeg progress lines to logs at debug level only.
+    log.debug?.('cinema-pipe', String(chunk).trim().slice(0, 200))
+  })
+  ff.on('error', (err) => log.warn('cinema-pipe', `ffmpeg error: ${err.message}`))
+  const headers = new Headers({
+    'content-type': 'video/mp4',
+    'cache-control': 'no-store'
+  })
+  return new Response(Readable.toWeb(ff.stdout) as never, { status: 200, headers })
+}
+
 function registerMediaProtocol(): void {
   protocol.handle('gh-media', async (request) => {
     try {
@@ -305,6 +349,13 @@ function registerMediaProtocol(): void {
       const item = mediaStore.load().items.find((entry) => entry.id === id)
       if (!item || !existsSync(item.path)) return new Response(null, { status: 404 })
       const force = url.searchParams.get('transcode') === 'full'
+      if (force) {
+        // Force path = the player already saw the source fail. Skip the disk
+        // transcode (which would block playback for many minutes on big files)
+        // and stream a live ffmpeg pipe so playback starts in seconds.
+        const piped = streamTranscodePipe(item.path)
+        if (piped) return piped
+      }
       const compatPath = await ensureCompatMediaPath(item.id, item.path, { force })
       return streamFileResponse(compatPath ?? item.path, request)
     } catch (err) {
@@ -364,7 +415,12 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.cjs'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Critical for the splash chimes + cinema audio: without this, Chromium
+      // blocks every AudioContext until a user gesture, which silently kills
+      // the boot sound (the splash never hears one because the gesture-armed
+      // retry races with the visual stage transition).
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
 

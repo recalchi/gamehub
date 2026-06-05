@@ -68,7 +68,7 @@ const HELPER_SRC = join(HELPER_DIR, 'rtss-probe.cs')
  * Bump this whenever HELPER_CS changes, so an existing cached exe gets
  * rebuilt. Without this you'd keep running the old probe forever.
  */
-const HELPER_VERSION = 5
+const HELPER_VERSION = 6
 const HELPER_VERSION_FILE = join(HELPER_DIR, 'version')
 
 const diagnostic: RtssStatus['diagnostic'] = {
@@ -422,8 +422,15 @@ class RtssProbe {
         continue;
       }
       try {
+        // RTSS signature is the C multi-char literal 'RTSS', which compiles to
+        //   'R' << 24 | 'T' << 16 | 'S' << 8 | 'S'  ==  0x52545353
+        // Earlier versions of this helper checked the byte-swapped form
+        // (0x53535452) and ALWAYS missed — which is why every single read
+        // looked like MIC denial. There is no MIC issue, RTSS publishes the
+        // SHM with a world-read DACL. The whole user/admin saga was chasing
+        // a 4-byte typo.
         uint sig = (uint)Marshal.ReadInt32(view, 0);
-        if (sig != 0x53535452u) {
+        if (sig != 0x52545353u) {
           status = "NO_SIG";
           // Preserve the sig value as the FINAL detail — when sig is 0 it
           // almost always means our medium-IL process is being denied data
@@ -447,6 +454,14 @@ class RtssProbe {
           detail = "appEntrySize=" + appEntrySize + " appArrSize=" + appArrSize + " in " + mapName;
           continue;
         }
+        // Two layouts exist in the wild:
+        //   V1 (older, no szDescription): time0=0x10C  time1=0x110  frames=0x114
+        //   V2 (current, with szDescription): time0=0x210 time1=0x214 frames=0x218
+        // Pick by appEntrySize — V1 is ~0x118 bytes, V2 is ~0x300+.
+        bool v2 = appEntrySize >= 0x200;
+        int offTime0 = v2 ? 0x210 : 0x10C;
+        int offTime1 = v2 ? 0x214 : 0x110;
+        int offFrames = v2 ? 0x218 : 0x114;
         for (int i = 0; i < appArrSize; i++) {
           long off = (long)appArrOffset + (long)i * (long)appEntrySize;
           int pid = Marshal.ReadInt32(view, (int)off);
@@ -458,9 +473,9 @@ class RtssProbe {
           string name = Encoding.ASCII.GetString(nameBuf, 0, z);
           int sl = Math.Max(name.LastIndexOf('\\\\'), name.LastIndexOf('/'));
           if (sl >= 0 && sl < name.Length - 1) name = name.Substring(sl + 1);
-          uint t0 = (uint)Marshal.ReadInt32(view, (int)off + 0x10C);
-          uint t1 = (uint)Marshal.ReadInt32(view, (int)off + 0x110);
-          uint frames = (uint)Marshal.ReadInt32(view, (int)off + 0x114);
+          uint t0 = (uint)Marshal.ReadInt32(view, (int)off + offTime0);
+          uint t1 = (uint)Marshal.ReadInt32(view, (int)off + offTime1);
+          uint frames = (uint)Marshal.ReadInt32(view, (int)off + offFrames);
           if (t1 <= t0 || frames == 0) continue;
           double fps = (double)frames * 1000.0 / (double)(t1 - t0);
           if (fps <= 0 || fps > 1000) continue;

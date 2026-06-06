@@ -30,7 +30,10 @@ const execFileAsync = promisify(execFile)
  * call per tick, ~30ms.
  */
 
-const POLL_MS = 4000
+// Bumped from 4s to 10s. On heavily-loaded systems tasklist takes ~8s; the
+// old 4s loop was firing a second tasklist before the first finished, piling
+// up zombie powershell/tasklist calls and starving the CPU.
+const POLL_MS = 10000
 /**
  * How many missed polls before we consider an auto-attached game closed.
  * Was 3 (~12s) but anti-cheat games (Elden Ring/EAC) intermittently make
@@ -159,10 +162,15 @@ async function listProcesses(): Promise<RunningProcess[]> {
   // No Path is exposed by tasklist; we resolve it lazily on disambiguation
   // by checking the game's known install dir against a process query.
   try {
+    // Timeout bumped to 30s — on this user's machine with Elden Ring + MSI
+    // Afterburner + Discord all running, tasklist takes ~8s to enumerate
+    // (verified locally: time tasklist /FO CSV /NH = 8.5s real time). The
+    // old 6s timeout was killing the command mid-enumeration, leaving the
+    // panel at "--" forever.
     const { stdout } = await execFileAsync(
       'tasklist.exe',
       ['/FO', 'CSV', '/NH'],
-      { windowsHide: true, timeout: 6000, maxBuffer: 8 * 1024 * 1024 }
+      { windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }
     )
     const out: RunningProcess[] = []
     for (const line of stdout.split(/\r?\n/)) {

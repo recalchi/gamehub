@@ -44,6 +44,7 @@ import type {
   PerformanceSample,
   PerfSessionSummary,
   PerfSessionDetail,
+  FpsCaptureStatus,
   RtssEnsureResult,
   RtssStatus,
   PlatformId,
@@ -134,6 +135,7 @@ export interface GameHubApi {
     session: (gameId: string, sessionId: string) => Promise<PerfSessionDetail | null>
     rtssStatus: () => Promise<RtssStatus>
     rtssEnsure: () => Promise<RtssEnsureResult>
+    fpsCaptureStatus: () => Promise<FpsCaptureStatus>
   }
   discord: {
     status: () => Promise<DiscordRpcStatus>
@@ -349,6 +351,7 @@ const api: GameHubApi = {
     sessions: (gameId, limit) => ipcRenderer.invoke(IPC.performance.sessions, gameId, limit),
     session: (gameId, sessionId) => ipcRenderer.invoke(IPC.performance.session, gameId, sessionId),
     rtssStatus: () => ipcRenderer.invoke(IPC.performance.rtssStatus),
+    fpsCaptureStatus: () => ipcRenderer.invoke(IPC.performance.fpsCaptureStatus),
     rtssEnsure: () => ipcRenderer.invoke(IPC.performance.rtssEnsure)
   },
   discord: {

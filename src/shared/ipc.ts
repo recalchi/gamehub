@@ -68,6 +68,7 @@ export const IPC = {
     /** ipc: read full samples of one session for a game */
     session: 'performance:session',
     /** ipc: RTSS installed/running status (for the "ativar overlay" banner) */
+    fpsCaptureStatus: 'performance:fps-capture-status',
     rtssStatus: 'performance:rtss-status',
     /** ipc: ask GameHub to launch RTSS if installed */
     rtssEnsure: 'performance:rtss-ensure'

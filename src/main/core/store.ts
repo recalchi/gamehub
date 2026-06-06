@@ -83,8 +83,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     clientSecret: ''
   },
   media: {
-    mediaRoots: ['E:\\Filmes e Séries'],
-    downloadRoot: 'E:\\Filmes e Séries\\Livres',
+    mediaRoots: ['D:\\Midia\\Videos\\Filmes e Séries', 'E:\\Filmes e Séries'],
+    downloadRoot: 'D:\\Midia\\Videos\\Filmes e Séries\\Livres',
     openInExternalPlayer: true,
     playerMode: 'internal',
     subtitlesEnabled: true,

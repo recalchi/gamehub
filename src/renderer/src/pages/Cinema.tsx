@@ -1568,10 +1568,22 @@ function MediaCard({
       >
         <div className="relative aspect-[2/3] bg-gradient-to-br from-slate-800 to-ink-950">
           {item.cover ? (
-            <img src={item.cover} alt={item.title} className="h-full w-full object-cover transition duration-700 group-hover:scale-105" />
+            <img
+              src={item.cover}
+              alt={item.title}
+              className={`h-full w-full object-cover transition duration-700 group-hover:scale-105 ${
+                item.fileMissing ? 'grayscale opacity-60' : ''
+              }`}
+            />
           ) : (
             <div className="flex h-full items-center justify-center p-4 text-center font-display text-lg font-bold text-slate-300">
               {item.title}
+            </div>
+          )}
+          {/* Missing-file badge (top-center) */}
+          {item.fileMissing && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-md bg-rose-500/85 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-50 shadow">
+              Arquivo ausente
             </div>
           )}
           {/* Watched badge (top-left) */}

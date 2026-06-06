@@ -375,14 +375,26 @@ function registerMediaProtocol(): void {
       const id = decodeURIComponent(url.pathname.replace(/^\//, ''))
       if (url.hostname !== 'item' || !id) return new Response(null, { status: 404 })
       const item = mediaStore.load().items.find((entry) => entry.id === id)
-      if (!item || !existsSync(item.path)) return new Response(null, { status: 404 })
+      if (!item) {
+        log.warn('protocol', `gh-media item not in catalog: ${id}`)
+        return new Response(null, { status: 404 })
+      }
+      if (!existsSync(item.path)) {
+        log.warn('protocol', `gh-media file missing on disk: ${item.path}`)
+        return new Response(null, {
+          status: 410,
+          headers: { 'x-gh-reason': 'file-missing' }
+        })
+      }
       const force = url.searchParams.get('transcode') === 'full'
+      log.info(
+        'protocol',
+        `gh-media req item=${id} force=${force} path=${item.path}`
+      )
       if (force) {
-        // Force path = the player already saw the source fail. Skip the disk
-        // transcode (which would block playback for many minutes on big files)
-        // and stream a live ffmpeg pipe so playback starts in seconds.
         const piped = streamTranscodePipe(item.path)
         if (piped) return piped
+        log.warn('protocol', 'streamTranscodePipe returned null, falling back to disk transcode')
       }
       const compatPath = await ensureCompatMediaPath(item.id, item.path, { force })
       return streamFileResponse(compatPath ?? item.path, request)

@@ -7,6 +7,7 @@ import { settingsStore } from './store'
 import { log } from './logger'
 import { appendPerfSample, beginPerfSession, endPerfSession } from './performance-log'
 import { fpsForProcess } from './rtss'
+import { queryProcessByPid } from './proc-helper'
 import { IPC } from '@shared/ipc'
 import type { ActiveLaunch, Game, PerformanceReport, PerformanceSample } from '@shared/types'
 
@@ -415,23 +416,47 @@ async function queryProcess(
     Instances?: number
     Pids?: string
     LeadPid?: number | null
+  } | null = null
+
+  // Step 1a: if we have a PID, try the C# helper first. ~20ms vs 300ms for
+  // PowerShell, and it works even on machines where PowerShell is broken
+  // (anti-cheat / Defender / locked-down profiles).
+  if (pid) {
+    const direct = await queryProcessByPid(pid)
+    if (direct) {
+      parsed = {
+        Name: direct.name,
+        CPU: direct.cpu,
+        WorkingSet64: direct.ws,
+        PrivateMemorySize64: direct.pvt,
+        Responding: direct.responding,
+        Title: direct.title ?? null,
+        Instances: 1,
+        Pids: String(pid),
+        LeadPid: pid
+      }
+    }
   }
-  try {
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-      { timeout: 3000, windowsHide: true }
-    )
-    parsed = JSON.parse(stdout.trim())
-  } catch (err) {
-    log.warn('performance', `queryProcess fast path failed`, {
-      gameId,
-      pid,
-      processName,
-      err: err instanceof Error ? err.message : String(err)
-    })
-    return null
+
+  if (!parsed) {
+    try {
+      const { stdout } = await execFileAsync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+        { timeout: 3000, windowsHide: true }
+      )
+      parsed = JSON.parse(stdout.trim())
+    } catch (err) {
+      log.warn('performance', `queryProcess fast path failed`, {
+        gameId,
+        pid,
+        processName,
+        err: err instanceof Error ? err.message : String(err)
+      })
+      return null
+    }
   }
+  if (!parsed) return null
 
   // --- Step 2: GPU sampling on a lower cadence (every 4th sample) — uses
   // Performance Counters which are slow. Cached in between calls so the UI

@@ -595,6 +595,11 @@ export interface MediaItem {
   subtitles: MediaSubtitle[]
   relatedFiles: string[]
   tags?: string[]
+  /**
+   * True when the on-disk file is missing (cover/metadata still present).
+   * Computed during scan; the UI greys the card and shows "arquivo ausente".
+   */
+  fileMissing?: boolean
 }
 
 export interface MediaLibraryFile {

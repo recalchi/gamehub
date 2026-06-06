@@ -651,6 +651,10 @@ export function registerIpcHandlers(): void {
     const { rtssStatus } = await import('@main/core/rtss')
     return rtssStatus()
   })
+  ipcMain.handle(IPC.performance.fpsCaptureStatus, async () => {
+    const { presentMonStatus } = await import('@main/core/presentmon')
+    return presentMonStatus()
+  })
   ipcMain.handle(IPC.performance.rtssEnsure, async () => {
     const { ensureRtssRunning } = await import('@main/core/rtss')
     return ensureRtssRunning()

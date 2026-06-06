@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import type {
   CrashStats,
+  FpsCaptureStatus,
   Game,
   PerfSessionSummary,
   PerformanceReport,
@@ -47,6 +48,7 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
   const [crashStats, setCrashStats] = useState<CrashStats | null>(null)
   const [sessions, setSessions] = useState<PerfSessionSummary[]>([])
   const [rtss, setRtss] = useState<RtssStatus | null>(null)
+  const [fpsCap, setFpsCap] = useState<FpsCaptureStatus | null>(null)
   const [rtssBusy, setRtssBusy] = useState(false)
   const isPcGame = game.platform === 'pc'
   // FPS rolling sum kept outside React state to avoid render churn each tick.
@@ -115,6 +117,9 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
       // several seconds (UAC, csc build, etc.) without blocking the UI.
       void window.api.performance.rtssStatus().then((status) => {
         if (!cancelled) setRtss(status)
+      })
+      void window.api.performance.fpsCaptureStatus().then((status) => {
+        if (!cancelled) setFpsCap(status)
       })
       void window.api.performance
         .rtssEnsure()
@@ -251,7 +256,29 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
           </div>
         </div>
 
-        {isPcGame && sample?.fps === undefined && (
+        {isPcGame && sample?.fps === undefined && fpsCap && !fpsCap.elevated && live && (
+          <div className="mt-4 rounded-lg border border-violet-400/30 bg-violet-400/10 p-3 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex-1">
+                <div className="text-violet-200 font-semibold text-sm">
+                  FPS exige GameHub em modo administrador
+                </div>
+                <p className="text-[11px] text-violet-100/80 mt-1 leading-relaxed">
+                  Para ler FPS de jogos com anti-cheat (Elden Ring, etc.), o GameHub usa o PresentMon (ETW kernel-level). Isso requer que o GameHub rode como administrador. Clique para reiniciar com elevação — você verá um único prompt do Windows, e a partir daí o FPS aparece automaticamente em todo jogo que abrir.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void window.api.system.relaunchAsAdmin()}
+                className="rounded-md bg-violet-400 px-4 py-2 text-xs font-semibold text-ink-950"
+              >
+                Reiniciar como admin
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isPcGame && sample?.fps === undefined && !(fpsCap && !fpsCap.elevated && live) && (
           <div className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 space-y-2">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="flex-1">

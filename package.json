@@ -1,6 +1,6 @@
 {
   "name": "gamehub",
-  "version": "0.2.10",
+  "version": "0.3.0",
   "description": "A fullscreen game launcher and emulator hub for PC, inspired by modern console interfaces.",
   "main": "out/main/index.cjs",
   "author": "GameHub",
@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:no-auto-admin": "set \"GAMEHUB_NO_AUTO_ADMIN=1\" && electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "build:win": "electron-vite build && set \"ELECTRON_CACHE=%CD%\\.cache\\electron\" && set \"ELECTRON_BUILDER_CACHE=%CD%\\.cache\\electron-builder\" && electron-builder --win --dir",

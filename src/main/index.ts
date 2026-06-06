@@ -47,6 +47,52 @@ try {
 } catch {
   // setName/setAppUserModelId may fail in some test envs — non-fatal.
 }
+
+// Auto-elevate at startup. PresentMon's ETW capture only works admin, so we
+// just always relaunch elevated rather than asking the user to click a
+// button per session. Skipped:
+//   - Non-Windows (no UAC)
+//   - Headless smoke modes (CLI tests)
+//   - The relaunched-as-admin process itself (we pass --gh-elevated to
+//     mark the child so it doesn't loop)
+//   - Dev with GAMEHUB_NO_AUTO_ADMIN=1 (escape hatch for hot-reload work)
+if (
+  process.platform === 'win32' &&
+  !process.argv.includes('--gh-elevated') &&
+  !process.env.GAMEHUB_NO_AUTO_ADMIN &&
+  !process.argv.some((a) => a.startsWith('--smoke-')) &&
+  !process.argv.includes('--scan') &&
+  !process.argv.includes('--seed-catalog') &&
+  !process.argv.includes('--refresh')
+) {
+  // Synchronous admin check via `net session` (only admins can run it).
+  // Done at module top because we need to decide BEFORE app.whenReady.
+  const { spawnSync } = require('node:child_process') as typeof import('node:child_process')
+  const r = spawnSync('net.exe', ['session'], { windowsHide: true, timeout: 3000 })
+  const isAdmin = r.status === 0
+  if (!isAdmin) {
+    // Spawn elevated copy of our own executable with the same argv, then
+    // exit. In production: process.execPath is GameHub.exe (single relaunch
+    // shows UAC). In dev: process.execPath is electron.exe — relaunching
+    // electron alone won't pick up our project, so we re-exec it with the
+    // original argv intact.
+    const elevatedArgs = ['--gh-elevated', ...process.argv.slice(1)]
+    const argList = elevatedArgs
+      .map((a) => `'${a.replace(/'/g, "''")}'`)
+      .join(',')
+    const psCmd =
+      `Start-Process -FilePath '${process.execPath.replace(/'/g, "''")}' ` +
+      `-ArgumentList ${argList} -Verb RunAs`
+    spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+      { windowsHide: true, timeout: 30000 }
+    )
+    // Exit immediately so the elevated copy takes over. app.quit() can't
+    // be called before whenReady, but process.exit always works.
+    process.exit(0)
+  }
+}
 const COMPAT_AUDIO_EXTENSIONS = new Set(['.mkv', '.avi', '.wmv', '.mpg', '.mpeg'])
 const compatMediaJobs = new Map<string, Promise<string | null>>()
 

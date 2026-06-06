@@ -354,7 +354,16 @@ export const MEDIA_CATALOG: MediaCatalogEntry[] = [
 const activeDownloads = new Map<string, { ctrl: AbortController; cancelled: boolean }>()
 
 export function listMedia(): MediaLibraryFileLike {
-  return mediaStore.load()
+  const data = mediaStore.load()
+  // Tag entries whose underlying file is gone. Cheap stat per item — runs
+  // only when the renderer asks for the list, so no perf concern. Keeps
+  // entries in place (cover/metadata still useful) but UI greys them out.
+  const items = data.items.map((item) => {
+    const missing = !existsSync(item.path)
+    if (missing === Boolean(item.fileMissing)) return item
+    return { ...item, fileMissing: missing }
+  })
+  return { ...data, items }
 }
 
 export function listWatchedMedia(): MediaWatchedFile {

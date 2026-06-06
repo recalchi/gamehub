@@ -65,19 +65,13 @@ export async function startPresentMonForPid(pid: number, processName?: string): 
   const bin = resolvePresentMonBinary()
   if (!bin) return false
 
-  // PresentMon 1.10 flags:
-  //   --process_id <PID>     scope to one process
-  //   --output_stdout        print CSV lines to stdout instead of file
-  //   --no_top               don't draw the top-of-frame summary
-  //   --terminate_after_timed -t 0 means run forever
-  //   --stop_existing_session  if ETW session already exists, take it over
-  const args = [
-    '--process_id', String(pid),
-    '--output_stdout',
-    '--no_top',
-    '--stop_existing_session',
-    '--no_csv_header'
-  ]
+  // PresentMon 1.10 flags use a SINGLE dash (not double). Wrong dashes were
+  // the silent failure that kept FPS at "--" the whole previous attempt.
+  //   -process_id PID         scope to one process
+  //   -output_file PATH       write CSV to a file we can tail
+  //   -no_top                 don't draw the top-of-frame summary
+  //   -stop_existing_session  if ETW session named "PresentMon" exists, take it over
+  //   -session_name           unique per PID so multiple games can be tracked
   try {
     log.info('presentmon', `spawning for pid=${pid} (${processName ?? '?'})`)
     // PresentMon needs admin for ETW. Use Start-Process -Verb RunAs.
@@ -88,12 +82,13 @@ export async function startPresentMonForPid(pid: number, processName?: string): 
     const outFile = join(tmpdir(), `gh-presentmon-${pid}.csv`)
     try { unlinkSync(outFile) } catch { /* not present */ }
     try { closeSync(openSync(outFile, 'w')) } catch { /* ignore */ }
+    const sessionName = `GameHub-${pid}`
     const ps = spawn(
       'powershell.exe',
       [
         '-NoProfile', '-NonInteractive', '-Command',
         `Start-Process -FilePath '${bin.replace(/'/g, "''")}' ` +
-        `-ArgumentList '--process_id','${pid}','--output_file','${outFile.replace(/'/g, "''")}','--no_top','--stop_existing_session','--no_csv_header','--terminate_existing_session' ` +
+        `-ArgumentList '-process_id','${pid}','-output_file','${outFile.replace(/'/g, "''")}','-no_top','-stop_existing_session','-session_name','${sessionName}' ` +
         `-Verb RunAs -WindowStyle Hidden`
       ],
       { windowsHide: true, detached: true, stdio: 'ignore' }
@@ -119,13 +114,28 @@ export function stopPresentMonForPid(pid: number): void {
 }
 
 /**
- * Lightweight CSV tailer. PresentMon CSV columns (1.10 default with
- * --no_csv_header so we know the order from docs):
- *   Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,
- *   PresentFlags,AllowsTearing,PresentMode,Dropped,TimeInSeconds,
- *   msInPresentAPI,msBetweenPresents, ...
- * msBetweenPresents (column 11, 0-indexed) is the frame interval —
- * FPS = 1000 / avgInterval over the last second.
+ * Lightweight CSV tailer. PresentMon 1.10 CSV columns (verified by running
+ * the bundled binary against DWM):
+ *   0  Application
+ *   1  ProcessID
+ *   2  SwapChainAddress
+ *   3  Runtime
+ *   4  SyncInterval
+ *   5  PresentFlags
+ *   6  Dropped
+ *   7  TimeInSeconds
+ *   8  msInPresentAPI
+ *   9  msBetweenPresents    ← what we need: frame interval in ms
+ *  10  AllowsTearing
+ *  11  PresentMode
+ *  12  msUntilRenderComplete
+ *  13  msUntilDisplayed
+ *  14  msBetweenDisplayChange
+ *
+ * FPS = 1000 / avg(msBetweenPresents) over the most recent samples.
+ *
+ * The earlier code read column 11 (PresentMode, a string) and silently
+ * discarded every sample as NaN — which is why no FPS ever showed up.
  */
 async function tailPresentMonCsv(pid: number, file: string): Promise<void> {
   const fs = await import('node:fs')
@@ -147,10 +157,12 @@ async function tailPresentMonCsv(pid: number, file: string): Promise<void> {
       lastSize = stat.size
       const text = buf.toString('utf8')
       for (const line of text.split(/\r?\n/)) {
-        if (!line || line.startsWith('Application')) continue
+        if (!line) continue
+        // Skip header (case-insensitive, matches any leading "Application" col)
+        if (/^application/i.test(line)) continue
         const cols = line.split(',')
-        if (cols.length < 12) continue
-        const msBetween = Number(cols[11])
+        if (cols.length < 10) continue
+        const msBetween = Number(cols[9])
         if (Number.isFinite(msBetween) && msBetween > 0 && msBetween < 1000) {
           buffer.push(msBetween)
         }

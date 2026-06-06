@@ -1,6 +1,6 @@
 {
   "name": "gamehub",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "A fullscreen game launcher and emulator hub for PC, inspired by modern console interfaces.",
   "main": "out/main/index.cjs",
   "author": "GameHub",

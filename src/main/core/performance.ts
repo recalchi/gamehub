@@ -7,6 +7,7 @@ import { settingsStore } from './store'
 import { log } from './logger'
 import { appendPerfSample, beginPerfSession, endPerfSession } from './performance-log'
 import { fpsForProcess } from './rtss'
+import { fpsFromPresentMon, startPresentMonForPid } from './presentmon'
 import { queryProcessByPid } from './proc-helper'
 import { IPC } from '@shared/ipc'
 import type { ActiveLaunch, Game, PerformanceReport, PerformanceSample } from '@shared/types'
@@ -83,6 +84,13 @@ export function startPerformanceMonitor(launch: ActiveLaunch): void {
     beginPerfSession(launch.gameId, launch.startedAt)
   } catch (err) {
     log.warn('performance', `beginPerfSession failed, continuing without log: ${String(err)}`)
+  }
+  // Fire up PresentMon for native PC games — this is what gives us FPS when
+  // RTSS is blocked by anti-cheat (EAC, BattlEye). One ETW session per game,
+  // self-contained, takes ~3s to spin up. Best-effort: failure here is non
+  // fatal; RTSS still works for non-EAC games.
+  if (launch.emulatorName === 'Windows' && launch.pid) {
+    void startPresentMonForPid(launch.pid, launch.processName).catch(() => undefined)
   }
   void sampleSession(launch.gameId)
 }
@@ -209,9 +217,12 @@ async function sampleSession(gameId: string): Promise<void> {
       // probes can return empty for protected/elevated processes.
       state.missCount += 1
       if (state.launch.emulatorName === 'Windows') {
-        // Even without a snapshot we may still have FPS via RTSS — publish
-        // a minimal "running" sample so the UI doesn't look frozen at "--".
-        const fpsFallback = await fpsForProcess(state.launch.pid, state.launch.processName)
+        // FPS source priority: PresentMon (ETW, works through anti-cheat) →
+        // RTSS (overlay-based, blocked by EAC). Even without a CPU snapshot
+        // we may still have FPS, so we publish a running sample so the UI
+        // doesn't look frozen at "--".
+        const pmFps = state.launch.pid ? fpsFromPresentMon(state.launch.pid) : undefined
+        const fpsFallback = pmFps ?? await fpsForProcess(state.launch.pid, state.launch.processName)
         const now = Date.now()
         const fallbackSample: PerformanceSample = {
           gameId,
@@ -272,6 +283,10 @@ async function sampleSession(gameId: string): Promise<void> {
     //     native PC games like Elden Ring as long as the user has any of
     //     these popular overlays installed.
     let fps = snapshot.windowTitle ? extractFpsFromTitle(snapshot.windowTitle) : undefined
+    if (fps === undefined) {
+      const pid = snapshot.pid ?? state.launch.pid
+      if (pid) fps = fpsFromPresentMon(pid)
+    }
     if (fps === undefined) {
       fps = await fpsForProcess(snapshot.pid ?? state.launch.pid, snapshot.name ?? state.launch.processName)
     }

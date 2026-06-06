@@ -10,11 +10,31 @@
  * via `Start-Process -Verb RunAs` once per game launch; subsequent reads are
  * free.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { log } from './logger'
+
+/**
+ * Are we running with elevated (admin) token?
+ *
+ * Use `net session` which only admins can execute. Returns true on exit 0,
+ * false otherwise. Cached after first call since IL doesn't change for the
+ * lifetime of the process.
+ */
+let isAdminCache: boolean | null = null
+export function isProcessElevated(): boolean {
+  if (process.platform !== 'win32') return false
+  if (isAdminCache !== null) return isAdminCache
+  try {
+    const r = spawnSync('net.exe', ['session'], { windowsHide: true, timeout: 3000 })
+    isAdminCache = r.status === 0
+  } catch {
+    isAdminCache = false
+  }
+  return isAdminCache
+}
 
 let presentmonBinary: string | null = null
 
@@ -65,43 +85,96 @@ export async function startPresentMonForPid(pid: number, processName?: string): 
   const bin = resolvePresentMonBinary()
   if (!bin) return false
 
-  // PresentMon 1.10 flags use a SINGLE dash (not double). Wrong dashes were
-  // the silent failure that kept FPS at "--" the whole previous attempt.
-  //   -process_id PID         scope to one process
-  //   -output_file PATH       write CSV to a file we can tail
-  //   -no_top                 don't draw the top-of-frame summary
-  //   -stop_existing_session  if ETW session named "PresentMon" exists, take it over
-  //   -session_name           unique per PID so multiple games can be tracked
-  try {
-    log.info('presentmon', `spawning for pid=${pid} (${processName ?? '?'})`)
-    // PresentMon needs admin for ETW. Use Start-Process -Verb RunAs.
-    // We can't get stdout from an elevated child via PowerShell trivially,
-    // so we redirect to a temp file and tail it.
-    const { tmpdir } = await import('node:os')
-    const { unlinkSync, openSync, closeSync } = await import('node:fs')
-    const outFile = join(tmpdir(), `gh-presentmon-${pid}.csv`)
-    try { unlinkSync(outFile) } catch { /* not present */ }
-    try { closeSync(openSync(outFile, 'w')) } catch { /* ignore */ }
-    const sessionName = `GameHub-${pid}`
-    const ps = spawn(
-      'powershell.exe',
-      [
-        '-NoProfile', '-NonInteractive', '-Command',
-        `Start-Process -FilePath '${bin.replace(/'/g, "''")}' ` +
-        `-ArgumentList '-process_id','${pid}','-output_file','${outFile.replace(/'/g, "''")}','-no_top','-stop_existing_session','-session_name','${sessionName}' ` +
-        `-Verb RunAs -WindowStyle Hidden`
-      ],
-      { windowsHide: true, detached: true, stdio: 'ignore' }
+  // PresentMon writes to its CSV file with EXCLUSIVE access — no other
+  // process can read it while PresentMon is alive. So we can't use the
+  // file-tail approach unless we own the file descriptor.
+  //
+  // Solution: use `-output_stdout` and capture PresentMon's stdout directly.
+  // That requires GameHub itself to be admin (ETW needs admin, and we need
+  // direct stdio with the child). If GameHub isn't elevated, we surface that
+  // through the UI and the user clicks the existing "Reiniciar como admin"
+  // button — once relaunched, this path works without any UAC per game.
+  if (!isProcessElevated()) {
+    log.warn(
+      'presentmon',
+      `not elevated — cannot spawn PresentMon for pid=${pid}. UI will prompt for relaunch.`
     )
-    ps.unref()
-    trackedSessions.set(pid, ps)
-    // Tail the CSV file once a second; compute FPS from the timing column.
-    void tailPresentMonCsv(pid, outFile)
+    return false
+  }
+
+  try {
+    log.info('presentmon', `spawning child for pid=${pid} (${processName ?? '?'})`)
+    const sessionName = `GameHub-${pid}`
+    // Pre-clean: terminate any stale ETW session with the same name. This
+    // matters when the previous GameHub instance crashed without cleanup —
+    // PresentMon refuses to start if a same-named session is alive.
+    const cleanup = spawnSync('logman.exe', ['stop', sessionName, '-ets'], {
+      windowsHide: true,
+      timeout: 3000
+    })
+    if (cleanup.status === 0) {
+      log.info('presentmon', `cleaned stale session ${sessionName}`)
+    }
+    const pmChild = spawn(
+      bin,
+      [
+        '-process_id', String(pid),
+        '-output_stdout',
+        '-no_top',
+        '-stop_existing_session',
+        '-session_name', sessionName,
+        '-terminate_on_proc_exit'
+      ],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+    )
+    trackedSessions.set(pid, pmChild)
+    pmChild.stderr?.on('data', (chunk) => {
+      log.debug?.('presentmon', `[stderr] ${String(chunk).trim().slice(0, 200)}`)
+    })
+    pmChild.on('exit', (code) => {
+      log.info('presentmon', `pm exit pid=${pid} code=${code}`)
+      trackedSessions.delete(pid)
+      fpsCache.delete(pid)
+    })
+    pmChild.on('error', (err) => {
+      log.warn('presentmon', `pm error pid=${pid}: ${err.message}`)
+    })
+    void consumePresentMonStdout(pid, pmChild)
     return true
   } catch (err) {
     log.warn('presentmon', `spawn failed: ${String(err)}`)
     return false
   }
+}
+
+/**
+ * Stream PresentMon stdout line-by-line, parse frame intervals, push into
+ * the FPS cache.
+ */
+async function consumePresentMonStdout(pid: number, proc: ChildProcess): Promise<void> {
+  if (!proc.stdout) return
+  const buffer: number[] = []
+  let leftover = ''
+  proc.stdout.on('data', (chunk) => {
+    const text = leftover + String(chunk)
+    const lines = text.split(/\r?\n/)
+    leftover = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line) continue
+      if (/^application/i.test(line)) continue
+      const cols = line.split(',')
+      if (cols.length < 10) continue
+      const msBetween = Number(cols[9])
+      if (Number.isFinite(msBetween) && msBetween > 0 && msBetween < 1000) {
+        buffer.push(msBetween)
+        if (buffer.length > 120) buffer.shift()
+        if (buffer.length >= 5) {
+          const avg = buffer.reduce((a, b) => a + b, 0) / buffer.length
+          fpsCache.set(pid, { fps: 1000 / avg, at: Date.now() })
+        }
+      }
+    }
+  })
 }
 
 export function stopPresentMonForPid(pid: number): void {
@@ -178,6 +251,15 @@ async function tailPresentMonCsv(pid: number, file: string): Promise<void> {
       fs.closeSync(fd)
     }
   }, 1000)
+}
+
+/** Status for the UI banner: are we admin? is PM available? */
+export function presentMonStatus(): { elevated: boolean; available: boolean; activeSessions: number } {
+  return {
+    elevated: isProcessElevated(),
+    available: resolvePresentMonBinary() !== null,
+    activeSessions: trackedSessions.size
+  }
 }
 
 export function shutdownAllPresentMon(): void {

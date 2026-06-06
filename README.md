@@ -1,6 +1,24 @@
-# GameHub 0.2.0 🎮
+# GameHub 0.3.0 🎮
 
-> Console-style launcher for PC + emulators + cinema mode, with tracking of playtime, journey (played/completed/platinum), save snapshots, and visual library.
+> Console-style launcher for PC + emulators + cinema mode, with tracking of playtime, journey (played/completed/platinum), save snapshots, visual library, and live performance metrics (CPU, GPU, RAM, FPS via PresentMon — works even on EAC/BattlEye games).
+
+## ⚡ Why GameHub auto-elevates to administrator
+
+GameHub asks Windows for elevation at startup. This is **required**, not optional:
+
+- **FPS reading on EAC/BattlEye protected games** (Elden Ring, Helldivers 2, etc.) uses Intel PresentMon's ETW (Event Tracing for Windows) capture. ETW sessions can only be created by elevated processes — there is no Windows API to capture present timing from medium-IL.
+- **RTSS shared memory** (when not blocked by anti-cheat) is published with a security descriptor that grants read to medium-IL, but RTSS itself requires admin to inject its overlay, so without an elevated GameHub we can never confirm RTSS is healthy.
+- **Process telemetry** for some hardened processes (anti-cheat, NVIDIA Frame Capture, MSI Afterburner) is hidden from non-admin token holders. CPU/RAM read paths fall back to the same elevated proc-helper.
+
+The startup elevation is **one UAC prompt per launch**, not per game. From the prompt onward every PC, Windows, Steam, or Epic title you open in that session reads FPS automatically through PresentMon.
+
+To bypass auto-elevation during hot-reload development:
+
+```bash
+npm run dev:no-auto-admin
+```
+
+This sets `GAMEHUB_NO_AUTO_ADMIN=1` and skips the elevation gate — FPS won't read on anti-cheat games, but the regular UI works for iteration.
 
 ## Quick Download ⬇️
 
@@ -72,7 +90,8 @@ GameHub e um hub para jogos e emuladores no Windows, com interface inspirada em 
 
 1. Baixe o instalador em [GameHub Setup](https://github.com/recalchi/gamehub/releases/latest/download/GameHub-Setup-x64.exe)
 2. Execute e siga o wizard
-3. Abra o GameHub e configure suas pastas em `Configuracoes > Biblioteca`
+3. Abra o GameHub — o Windows vai pedir **UAC (Controle de Conta de Usuario)** uma vez por sessao. Aceite. Isso e obrigatorio para ler FPS de jogos com anti-cheat (Elden Ring etc.) via PresentMon/ETW. Veja "Por que o GameHub pede admin" no topo do README.
+4. Configure suas pastas em `Configuracoes > Biblioteca`
 
 Opcional portatil:
 
@@ -88,6 +107,12 @@ Opcional portatil:
 npm install
 npm run typecheck
 npm run build
+
+# Dev com auto-elevacao (recomendado — FPS funciona):
+npm run dev
+
+# Dev sem auto-elevacao (para iterar mais rapido em UI / sem UAC repetido):
+npm run dev:no-auto-admin
 ```
 
 Pacotes Windows:

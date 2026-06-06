@@ -280,6 +280,15 @@ export interface PerformanceReport {
   health: 'good' | 'attention' | 'unknown'
 }
 
+export interface FpsCaptureStatus {
+  /** Are we running as admin? PresentMon requires it. */
+  elevated: boolean
+  /** Is PresentMon binary bundled and findable? */
+  available: boolean
+  /** Number of active capture sessions */
+  activeSessions: number
+}
+
 export interface RtssStatus {
   installed: boolean
   running: boolean

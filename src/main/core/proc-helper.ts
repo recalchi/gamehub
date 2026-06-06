@@ -90,17 +90,24 @@ async function ensureBuilt(): Promise<boolean> {
 
 export async function queryProcessByPid(pid: number): Promise<ProcQueryResult | null> {
   if (process.platform !== 'win32') return null
-  if (!(await ensureBuilt())) return null
+  if (!(await ensureBuilt())) {
+    log.debug?.('proc-helper', `helper not built, skipping pid=${pid}`)
+    return null
+  }
   try {
     const { stdout } = await execFileAsync(HELPER_EXE, [String(pid)], {
       windowsHide: true,
-      timeout: 2000,
+      timeout: 10000,
       maxBuffer: 64 * 1024
     })
     const trimmed = stdout.trim()
-    if (!trimmed.startsWith('{')) return null
+    if (!trimmed.startsWith('{')) {
+      log.debug?.('proc-helper', `pid=${pid} unexpected output: ${trimmed.slice(0, 80)}`)
+      return null
+    }
     return JSON.parse(trimmed) as ProcQueryResult
-  } catch {
+  } catch (err) {
+    log.debug?.('proc-helper', `pid=${pid} query failed: ${String(err).slice(0, 120)}`)
     return null
   }
 }

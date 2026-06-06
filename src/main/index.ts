@@ -1168,6 +1168,12 @@ app.on('before-quit', async () => {
   } catch {
     // best-effort
   }
+  try {
+    const { shutdownAllPresentMon } = await import('./core/presentmon')
+    shutdownAllPresentMon()
+  } catch {
+    // best-effort
+  }
 })
 
 process.on('uncaughtException', (err) => log.error('app', 'uncaught', { err: String(err) }))

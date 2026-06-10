@@ -6,6 +6,7 @@ import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 import type { Game, GameStatus, PlatformId } from '@shared/types'
 import PageHeader from '../components/PageHeader'
+import { formatPlayTime } from '../utils/time'
 
 const STATUS_COLORS: Record<GameStatus, string> = {
   ready: '#34d399',
@@ -44,7 +45,7 @@ export default function Stats(): JSX.Element {
         rightSlot={
           stats.steamSeconds > 0 ? (
             <p className="text-[11px] text-cyan-300/80">
-              Steam: {formatDuration(stats.steamSeconds)} somados de {stats.steamPlayedCount} jogo
+              Steam: {formatPlayTime(stats.steamSeconds)} somados de {stats.steamPlayedCount} jogo
               {stats.steamPlayedCount === 1 ? '' : 's'} importado
               {stats.steamPlayedCount === 1 ? '' : 's'}.
             </p>
@@ -69,7 +70,7 @@ export default function Stats(): JSX.Element {
         <Kpi
           icon={Clock}
           label="Tempo total jogado"
-          value={formatDuration(stats.totalSeconds)}
+          value={formatPlayTime(stats.totalSeconds)}
           accent="text-cyan-300"
         />
         <Kpi
@@ -178,7 +179,7 @@ export default function Stats(): JSX.Element {
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-accent font-mono text-sm">
-                          {formatDuration(g.playTime)}
+                          {formatPlayTime(g.playTime)}
                         </div>
                         {g.lastPlayedAt && (
                           <div className="text-[10px] text-slate-500">
@@ -367,14 +368,3 @@ function isSteamGame(game: Game): boolean {
   return game.path.startsWith('steam://') || game.flags?.includes('steam')
 }
 
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  const rem = minutes % 60
-  if (hours < 24) return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`
-  const days = Math.floor(hours / 24)
-  const hRem = hours % 24
-  return hRem > 0 ? `${days}d ${hRem}h` : `${days}d`
-}

@@ -721,7 +721,9 @@ function clamp(value: number, min: number, maxValue: number): number {
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = seconds % 60
-  return rest ? `${minutes}min ${rest}s` : `${minutes}min`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest ? `${hours}h ${rest}min` : `${hours}h`
 }

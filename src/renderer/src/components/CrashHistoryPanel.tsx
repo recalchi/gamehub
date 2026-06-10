@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import type { CrashCategory, CrashReport, CrashStats } from '@shared/types'
 import { M } from '../motion/tokens'
+import { formatPlayTime } from '../utils/time'
 
 const CATEGORY_META: Record<CrashCategory, { label: string; tone: string; icon: typeof Skull; hint: string }> = {
   'vulkan-oom': {
@@ -72,10 +73,7 @@ const CATEGORY_META: Record<CrashCategory, { label: string; tone: string; icon: 
 }
 
 function formatSeconds(s: number): string {
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${m}m ${r}s`
+  return formatPlayTime(s, '0s')
 }
 
 function timeAgo(iso: string): string {

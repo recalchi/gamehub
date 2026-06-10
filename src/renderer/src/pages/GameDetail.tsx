@@ -38,6 +38,7 @@ import MetadataEditor from '../components/MetadataEditor'
 import TagEditor from '../components/TagEditor'
 import GameBackdrop from '../components/GameBackdrop'
 import PerformancePanel from '../components/PerformancePanel'
+import { formatPlayTime } from '../utils/time'
 import LocalConfigPanel from '../components/LocalConfigPanel'
 
 export default function GameDetail(): JSX.Element {
@@ -129,7 +130,6 @@ export default function GameDetail(): JSX.Element {
   const platform = PLATFORMS[game.platform]
   const emu = game.emulator ? emulators.find((e) => e.id === game.emulator) : undefined
   const emuDef = game.emulator ? EMULATORS[game.emulator] : undefined
-  const playMinutes = Math.round((game.playTime ?? 0) / 60)
 
   return (
     // Plain fade — sharedElementVariants is gated on shared-layout being
@@ -200,7 +200,7 @@ export default function GameDetail(): JSX.Element {
               />
               <Field
                 label="Tempo jogado"
-                value={playMinutes > 0 ? `${playMinutes} min` : 'Nunca jogado'}
+                value={formatPlayTime(game.playTime, 'Nunca jogado')}
               />
               <Field
                 label="Última vez"

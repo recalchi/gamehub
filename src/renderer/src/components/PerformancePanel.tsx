@@ -18,6 +18,7 @@ import type {
   PerformanceSample,
   RtssStatus
 } from '@shared/types'
+import { formatPlayTime } from '../utils/time'
 
 interface SessionStats {
   fpsMin: number
@@ -435,7 +436,7 @@ export default function PerformancePanel({ game }: { game: Game }): JSX.Element 
           <Metric
             icon={Activity}
             label="Sessao"
-            value={sample ? formatDuration(sample.elapsedSeconds) : '--'}
+            value={sample ? formatPlayTime(sample.elapsedSeconds, '0s') : '--'}
             hint={sample?.responding === false ? 'sem responder' : 'responsivo'}
             tone={sample?.responding === false ? 'text-amber-300' : undefined}
           />
@@ -683,9 +684,3 @@ function formatMaybePercent(value?: number): string {
   return value === undefined ? '--' : `${Math.round(value)}%`
 }
 
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = seconds % 60
-  return rest ? `${minutes}min ${rest}s` : `${minutes}min`
-}

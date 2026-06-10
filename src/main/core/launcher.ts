@@ -809,25 +809,39 @@ async function watchDetachedNativeSession(
   }
 }
 
+async function startNativeWindowsProcess(executablePath: string): Promise<number> {
+  const safeExe = executablePath.replace(/'/g, "''")
+  const safeCwd = dirname(executablePath).replace(/'/g, "''")
+  const command = `
+    $p = Start-Process -FilePath '${safeExe}' -WorkingDirectory '${safeCwd}' -PassThru
+    if (-not $p -or -not $p.Id) { exit 2 }
+    $p.Id
+  `
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    { timeout: 15_000, windowsHide: true }
+  )
+  const pid = Number(stdout.trim().split(/\r?\n/).pop())
+  if (!Number.isFinite(pid) || pid <= 0) {
+    throw new Error(`Nao foi possivel obter PID ao iniciar ${executablePath}`)
+  }
+  return pid
+}
+
 async function launchNative(game: Game): Promise<LaunchResult> {
   if (!existsSync(game.path)) {
     return { ok: false, error: `Arquivo não encontrado: ${game.path}` }
   }
   try {
     const startedAt = Date.now()
-    const child = spawn(game.path, [], {
-      cwd: dirname(game.path),
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
     const output = new RingBuffer(OUTPUT_BUFFER_LINES)
-    child.stdout?.on('data', (chunk: Buffer) => output.push(chunk))
-    child.stderr?.on('data', (chunk: Buffer) => output.push(chunk))
+    const pid = await startNativeWindowsProcess(game.path)
     markStarted({
       gameId: game.id,
       gameTitle: game.title,
       emulatorName: 'Windows',
-      pid: child.pid,
+      pid,
       processName: game.path.split(/[\\/]/).pop()?.replace(/\.exe$/i, '').toLowerCase(),
       executablePath: game.path,
       startedAt: new Date(startedAt).toISOString(),
@@ -835,28 +849,10 @@ async function launchNative(game: Game): Promise<LaunchResult> {
     })
     const launchSettings = settingsStore.load().launch
     if (launchSettings.moveGameWindowAfterLaunch) {
-      maybeMoveGameWindow(child.pid, launchSettings.gameDisplay, launchSettings.fullscreenGames)
+      maybeMoveGameWindow(pid, launchSettings.gameDisplay, launchSettings.fullscreenGames)
     }
-    child.on('error', () => markEnded(game.id))
-    child.on('exit', (code) => {
-      void (async () => {
-        const userStopped = forceStopping.delete(game.id)
-        if (userStopped) {
-          const seconds = recordPlaySession(game, startedAt)
-          const tail = output.flush()
-          markEnded(game.id)
-          if (code !== 0 && code !== null && seconds < FAILURE_THRESHOLD_SECONDS) {
-            if (tail) log.warn('launcher', `native failure output tail`, { tail: tail.slice(-2000) })
-            broadcastFailure(game, code, seconds, 'Windows', tail)
-          }
-          return
-        }
-        const adopted = await adoptNativeSuccessorPid(game.id, child.pid)
-        if (adopted) return
-        void watchDetachedNativeSession(game, startedAt, code, output)
-      })()
-    })
-    return { ok: true, pid: child.pid, command: game.path }
+    void watchDetachedNativeSession(game, startedAt, null, output)
+    return { ok: true, pid, command: game.path }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }

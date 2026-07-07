@@ -2,6 +2,22 @@
 
 > Console-style launcher for PC + emulators + cinema mode, with tracking of playtime, journey (played/completed/platinum), save snapshots, visual library, and live performance metrics (CPU, GPU, RAM, FPS via PresentMon — works even on EAC/BattlEye games).
 
+## Portfolio Preview
+
+GameHub is a Windows desktop app built with Electron, React, TypeScript, and Tailwind. It is designed as a personal console-style command center for PC games, emulator libraries, save snapshots, cinema mode, and session telemetry.
+
+| Library | Game detail | Cinema mode |
+|---|---|---|
+| ![GameHub game library](docs/img/gamehub-library.png) | ![GameHub game dashboard](docs/img/gamehub-dashboard.png) | ![GameHub cinema mode](docs/img/gamehub-cinema.png) |
+
+**Validation snapshot**
+
+- `npm ci` reproducible install
+- `npm run typecheck` TypeScript checks
+- `npm run build` production build
+- `npm test -- --run` Vitest suite
+- `npm audit` currently clean
+
 ## ⚡ Why GameHub auto-elevates to administrator
 
 GameHub asks Windows for elevation at startup. This is **required**, not optional:

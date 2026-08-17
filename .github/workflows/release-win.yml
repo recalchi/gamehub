@@ -44,12 +44,13 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: |
-            release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe
-            release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe.blockmap
+            release/GameHub-Setup-x64.exe
+            release/GameHub-Setup-x64.exe.blockmap
+            release/GameHub-portable-x64.zip
             release/GameHub-portable-x64-${{ steps.version.outputs.version }}.zip
             release/latest.yml
             release/releases.json
-            release/GameHub-Setup-x64-${{ steps.version.outputs.version }}.exe.sha256
-            release/GameHub-portable-x64-${{ steps.version.outputs.version }}.zip.sha256
+            release/GameHub-Setup-x64.exe.sha256
+            release/GameHub-portable-x64.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

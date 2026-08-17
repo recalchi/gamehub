@@ -374,6 +374,10 @@ export interface AchievementDefinition {
   iconGray?: string
   hidden?: boolean
   unlocked?: boolean
+  category?: 'story' | 'boss' | 'ending' | 'collection' | 'upgrade' | 'milestone'
+  tier?: 'bronze' | 'silver' | 'gold' | 'platinum' | 'gamehub'
+  source?: 'steam' | 'retroachievements' | 'local' | 'gamehub'
+  checklistTotal?: number
 }
 
 export interface GameAchievementSummary {

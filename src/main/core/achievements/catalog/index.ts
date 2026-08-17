@@ -24,6 +24,92 @@ export interface AchievementCatalogEntry {
   sourceUrl?: string
 }
 
+type AchievementCategory = NonNullable<AchievementDefinition['category']>
+type AchievementTier = NonNullable<AchievementDefinition['tier']>
+
+function erAchievement(
+  slug: string,
+  title: string,
+  description: string,
+  category: AchievementCategory,
+  tier: AchievementTier = 'bronze'
+): AchievementDefinition {
+  return {
+    id: `er:${slug}`,
+    apiName: slug.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
+    title,
+    description,
+    category,
+    tier,
+    source: 'steam'
+  }
+}
+
+const ELDEN_RING_ACHIEVEMENTS: AchievementDefinition[] = [
+  erAchievement('roundtable-hold', 'Roundtable Hold', 'Chegou a Roundtable Hold.', 'story'),
+  erAchievement('margit-the-fell-omen', 'Margit, the Fell Omen', 'Derrotou Margit, the Fell Omen.', 'boss'),
+  erAchievement('shardbearer-godrick', 'Shardbearer Godrick', 'Derrotou Shardbearer Godrick.', 'boss', 'silver'),
+  erAchievement('great-rune', 'Great Rune', 'Restaurou o poder de uma Great Rune.', 'story'),
+  erAchievement('red-wolf-of-radagon', 'Red Wolf of Radagon', 'Derrotou Red Wolf of Radagon.', 'boss'),
+  erAchievement('rennala-queen-of-the-full-moon', 'Rennala, Queen of the Full Moon', 'Derrotou Rennala, Queen of the Full Moon.', 'boss', 'silver'),
+  erAchievement('leonine-misbegotten', 'Leonine Misbegotten', 'Derrotou Leonine Misbegotten.', 'boss'),
+  erAchievement('royal-knight-loretta', 'Royal Knight Loretta', 'Derrotou Royal Knight Loretta.', 'boss'),
+  erAchievement('shardbearer-radahn', 'Shardbearer Radahn', 'Derrotou Shardbearer Radahn.', 'boss', 'silver'),
+  erAchievement('mimic-tear', 'Mimic Tear', 'Derrotou Mimic Tear.', 'boss'),
+  erAchievement('godfrey-first-elden-lord', 'Godfrey, First Elden Lord', 'Derrotou Godfrey, First Elden Lord.', 'boss', 'silver'),
+  erAchievement('shardbearer-morgott', 'Shardbearer Morgott', 'Derrotou Shardbearer Morgott.', 'boss', 'silver'),
+  erAchievement('magma-wyrm-makar', 'Magma Wyrm Makar', 'Derrotou Magma Wyrm Makar.', 'boss'),
+  erAchievement('god-slaying-armament', 'God-Slaying Armament', 'Melhorou qualquer armamento ate o estagio maximo.', 'upgrade', 'silver'),
+  erAchievement('fire-giant', 'Fire Giant', 'Derrotou Fire Giant.', 'boss', 'silver'),
+  erAchievement('erdtree-aflame', 'Erdtree Aflame', 'Usou kindling para incendiar a Erdtree.', 'story', 'silver'),
+  erAchievement('commander-niall', 'Commander Niall', 'Derrotou Commander Niall.', 'boss'),
+  erAchievement('shardbearer-rykard', 'Shardbearer Rykard', 'Derrotou Shardbearer Rykard.', 'boss', 'silver'),
+  erAchievement('astel-naturalborn-of-the-void', 'Astel, Naturalborn of the Void', 'Derrotou Astel, Naturalborn of the Void.', 'boss'),
+  erAchievement('godskin-duo', 'Godskin Duo', 'Derrotou Godskin Duo.', 'boss', 'silver'),
+  erAchievement('godskin-noble', 'Godskin Noble', 'Derrotou Godskin Noble.', 'boss'),
+  erAchievement('ancestor-spirit', 'Ancestor Spirit', 'Derrotou Ancestor Spirit.', 'boss'),
+  erAchievement('maliketh-the-black-blade', 'Maliketh the Black Blade', 'Derrotou Maliketh the Black Blade.', 'boss', 'gold'),
+  erAchievement('shardbearer-mohg', 'Shardbearer Mohg', 'Derrotou Shardbearer Mohg.', 'boss', 'silver'),
+  erAchievement('hoarah-loux-warrior', 'Hoarah Loux, Warrior', 'Derrotou Hoarah Loux, Warrior.', 'boss', 'gold'),
+  erAchievement('valiant-gargoyles', 'Valiant Gargoyles', 'Derrotou Valiant Gargoyles.', 'boss'),
+  erAchievement('loretta-knight-of-the-haligtree', 'Loretta, Knight of the Haligtree', 'Derrotou Loretta, Knight of the Haligtree.', 'boss'),
+  erAchievement('elemer-of-the-briar', 'Elemer of the Briar', 'Derrotou Elemer of the Briar.', 'boss'),
+  erAchievement('dragonkin-soldier-of-nokstella', 'Dragonkin Soldier of Nokstella', 'Derrotou Dragonkin Soldier of Nokstella.', 'boss'),
+  erAchievement('regal-ancestor-spirit', 'Regal Ancestor Spirit', 'Derrotou Regal Ancestor Spirit.', 'boss'),
+  erAchievement('shardbearer-malenia', 'Shardbearer Malenia', 'Derrotou Shardbearer Malenia.', 'boss', 'gold'),
+  erAchievement('mohg-the-omen', 'Mohg, the Omen', 'Derrotou Mohg, the Omen.', 'boss'),
+  erAchievement('dragonlord-placidusax', 'Dragonlord Placidusax', 'Derrotou Dragonlord Placidusax.', 'boss', 'gold'),
+  erAchievement('lichdragon-fortissax', 'Lichdragon Fortissax', 'Derrotou Lichdragon Fortissax.', 'boss', 'gold'),
+  erAchievement('age-of-the-stars', 'Age of the Stars', 'Alcancou o final Age of the Stars.', 'ending', 'gold'),
+  erAchievement('elden-lord', 'Elden Lord', 'Alcancou o final Elden Lord.', 'ending', 'gold'),
+  erAchievement('legendary-armaments', 'Legendary Armaments', 'Adquiriu todos os armamentos lendarios.', 'collection', 'silver'),
+  erAchievement('legendary-ashen-remains', 'Legendary Ashen Remains', 'Adquiriu todos os Legendary Ashen Remains.', 'collection', 'silver'),
+  erAchievement('legendary-talismans', 'Legendary Talismans', 'Adquiriu todos os talismas lendarios.', 'collection', 'silver'),
+  erAchievement('legendary-sorceries-and-incantations', 'Legendary Sorceries and Incantations', 'Adquiriu todas as sorceries e incantations lendarias.', 'collection', 'silver'),
+  erAchievement('lord-of-frenzied-flame', 'Lord of Frenzied Flame', 'Alcancou o final Lord of Frenzied Flame.', 'ending', 'gold'),
+  erAchievement('elden-ring', 'Elden Ring', 'Obteve todas as conquistas oficiais.', 'milestone', 'platinum'),
+  {
+    id: 'er:gamehub-achievement-bosses',
+    apiName: 'GAMEHUB_ACHIEVEMENT_BOSSES',
+    title: 'GameHub: 30 chefes de conquista',
+    description: 'Checklist pessoal para marcar todos os chefes que liberam conquista/trofeu oficial.',
+    category: 'boss',
+    tier: 'gamehub',
+    source: 'gamehub',
+    checklistTotal: 30
+  },
+  {
+    id: 'er:gamehub-base-game-boss-hunt',
+    apiName: 'GAMEHUB_BASE_GAME_BOSS_HUNT',
+    title: 'GameHub: caca completa de bosses',
+    description: 'Marco pessoal para quem quer registrar uma limpa completa nos chefes do jogo base.',
+    category: 'milestone',
+    tier: 'gamehub',
+    source: 'gamehub',
+    checklistTotal: 166
+  }
+]
+
 /** Lightweight seed. Extend by adding entries below. */
 export const LOCAL_ACHIEVEMENT_CATALOG: AchievementCatalogEntry[] = [
   {
@@ -34,20 +120,9 @@ export const LOCAL_ACHIEVEMENT_CATALOG: AchievementCatalogEntry[] = [
       exe: ['eldenring.exe', 'start_protected_game.exe']
     },
     platforms: ['pc'],
-    sourceLabel: 'GameHub catalog · Elden Ring',
-    sourceUrl: 'https://store.steampowered.com/app/1245620',
-    achievements: [
-      { id: 'er:elden-lord', apiName: 'ELDEN_LORD', title: 'Elden Lord', description: 'Final ending achievement.' },
-      { id: 'er:age-of-stars', apiName: 'AGE_OF_STARS', title: 'Age of the Stars', description: 'Ranni ending.' },
-      { id: 'er:lord-frenzied-flame', apiName: 'LORD_FRENZIED', title: 'Lord of Frenzied Flame', description: 'Frenzy ending.' },
-      { id: 'er:age-of-duskborn', apiName: 'AGE_OF_DUSKBORN', title: 'Age of the Duskborn', description: 'Fia ending.' },
-      { id: 'er:blessing-of-despair', apiName: 'BLESSING_OF_DESPAIR', title: 'Blessing of Despair', description: 'Goldmask ending.' },
-      { id: 'er:legendary-armaments', apiName: 'LEGENDARY_ARMAMENTS', title: 'Legendary Armaments', description: 'Acquire all legendary armaments.' },
-      { id: 'er:legendary-sorceries', apiName: 'LEGENDARY_SORCERIES', title: 'Legendary Sorceries and Incantations', description: 'Acquire all legendary sorceries and incantations.' },
-      { id: 'er:great-rune', apiName: 'GREAT_RUNE', title: 'Great Rune', description: 'Acquire a Great Rune.' },
-      { id: 'er:godrick-grafted', apiName: 'GODRICK', title: 'Godrick the Grafted', description: 'Defeat Godrick the Grafted.' },
-      { id: 'er:malenia', apiName: 'MALENIA', title: 'Malenia, Blade of Miquella', description: 'Defeat Malenia.' }
-    ]
+    sourceLabel: 'Steam + GameHub · Elden Ring',
+    sourceUrl: 'https://steamcommunity.com/stats/1245620/achievements',
+    achievements: ELDEN_RING_ACHIEVEMENTS
   },
   {
     id: 'hollow-knight',

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { layoutSpring } from '../motion/tokens'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -9,19 +9,27 @@ import {
   Award,
   Check,
   Clock,
+  Crown,
   Download,
   ExternalLink,
   FileText,
+  Flame,
   FolderOpen,
+  Gem,
   Heart,
   HelpCircle,
   Loader2,
   Lock,
+  Medal,
   Pencil,
   Play,
+  ShieldCheck,
   Square,
   Settings as SettingsIcon,
   Sliders,
+  Sparkles,
+  Swords,
+  Target,
   Trophy,
   Trash2,
   X
@@ -29,7 +37,12 @@ import {
 import { useLibraryStore } from '../store/library'
 import { PLATFORMS } from '@shared/platforms'
 import { EMULATORS } from '@shared/emulators'
-import type { Game, GameAchievementDetail, GameCompletionStatus } from '@shared/types'
+import type {
+  AchievementDefinition,
+  Game,
+  GameAchievementDetail,
+  GameCompletionStatus
+} from '@shared/types'
 import SaveManagerPanel from '../components/SaveManagerPanel'
 import BiosPanel from '../components/BiosPanel'
 import CrashHistoryPanel from '../components/CrashHistoryPanel'
@@ -414,8 +427,64 @@ function GameDetailBackdrop({
   return <GameBackdrop game={game} preset={preset} />
 }
 
+type AchievementCategory = NonNullable<AchievementDefinition['category']>
+type AchievementFilter = 'all' | AchievementCategory
+
+const ACHIEVEMENT_CATEGORY_META: Record<
+  AchievementCategory,
+  { label: string; icon: typeof Award; tone: string; tile: string }
+> = {
+  story: {
+    label: 'Historia',
+    icon: ShieldCheck,
+    tone: 'text-sky-200 bg-sky-400/10 border-sky-300/20',
+    tile: 'from-sky-500/40 via-cyan-500/20 to-slate-950'
+  },
+  boss: {
+    label: 'Chefes',
+    icon: Swords,
+    tone: 'text-rose-200 bg-rose-400/10 border-rose-300/20',
+    tile: 'from-rose-500/45 via-red-500/20 to-slate-950'
+  },
+  ending: {
+    label: 'Finais',
+    icon: Crown,
+    tone: 'text-amber-200 bg-amber-400/10 border-amber-300/20',
+    tile: 'from-amber-400/45 via-orange-500/20 to-slate-950'
+  },
+  collection: {
+    label: 'Colecoes',
+    icon: Gem,
+    tone: 'text-violet-200 bg-violet-400/10 border-violet-300/20',
+    tile: 'from-violet-500/45 via-fuchsia-500/20 to-slate-950'
+  },
+  upgrade: {
+    label: 'Upgrade',
+    icon: Flame,
+    tone: 'text-orange-200 bg-orange-400/10 border-orange-300/20',
+    tile: 'from-orange-500/45 via-yellow-500/20 to-slate-950'
+  },
+  milestone: {
+    label: 'Marcos',
+    icon: Trophy,
+    tone: 'text-emerald-200 bg-emerald-400/10 border-emerald-300/20',
+    tile: 'from-emerald-500/45 via-teal-500/20 to-slate-950'
+  }
+}
+
+const ACHIEVEMENT_FILTERS: Array<{ id: AchievementFilter; label: string; icon: typeof Award }> = [
+  { id: 'all', label: 'Todas', icon: Award },
+  { id: 'boss', label: 'Chefes', icon: Swords },
+  { id: 'ending', label: 'Finais', icon: Crown },
+  { id: 'collection', label: 'Colecoes', icon: Gem },
+  { id: 'story', label: 'Historia', icon: ShieldCheck },
+  { id: 'upgrade', label: 'Upgrade', icon: Flame },
+  { id: 'milestone', label: 'Marcos', icon: Sparkles }
+]
+
 function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail | null; gameId: string }): JSX.Element {
   const [unlocked, setUnlocked] = useState<Record<string, string>>({})
+  const [filter, setFilter] = useState<AchievementFilter>('all')
 
   useEffect(() => {
     let alive = true
@@ -444,6 +513,13 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
   const ready = detail.summary.status === 'ready'
   const unlockedCount = Object.keys(unlocked).length
   const total = detail.achievements.length
+  const catalogTotal = detail.achievements.filter((achievement) => achievement.source !== 'gamehub').length
+  const gamehubTotal = detail.achievements.filter((achievement) => achievement.source === 'gamehub').length
+  const visibleAchievements =
+    filter === 'all'
+      ? detail.achievements
+      : detail.achievements.filter((achievement) => achievement.category === filter)
+  const completionPercent = total ? Math.round((unlockedCount / total) * 100) : 0
 
   return (
     <section id="achievements" className="mt-4 glass rounded-lg p-4">
@@ -462,18 +538,24 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
         </Link>
       </div>
 
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <AchievementStat icon={<Award className="w-4 h-4" />} label="Progresso" value={`${unlockedCount} / ${total}`} />
+        <AchievementStat icon={<Medal className="w-4 h-4" />} label="Base catalogada" value={`${catalogTotal} itens`} />
+        <AchievementStat icon={<Target className="w-4 h-4" />} label="Checklists" value={`${gamehubTotal} GameHub`} />
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <span className="rounded bg-accent/15 px-2 py-1 text-accent">
+        <span className="rounded border border-accent/20 bg-accent/15 px-2 py-1 text-accent">
           {detail.summary.sourceLabel}
         </span>
-        <span className="rounded bg-white/5 px-2 py-1 text-slate-300">
-          {total > 0 ? `${unlockedCount} / ${total}` : 'Sem lista local'}
+        <span className="rounded border border-white/10 bg-white/5 px-2 py-1 text-slate-300">
+          {total > 0 ? `${completionPercent}% concluido` : 'Sem lista local'}
         </span>
         {detail.summary.sourceUrl && (
           <button
             type="button"
             onClick={() => window.api.system.openExternal(detail.summary.sourceUrl!)}
-            className="rounded bg-white/5 px-2 py-1 text-slate-300 hover:bg-white/10 inline-flex items-center gap-1"
+            className="rounded border border-white/10 bg-white/5 px-2 py-1 text-slate-300 hover:bg-white/10 inline-flex items-center gap-1"
           >
             <ExternalLink className="w-3 h-3" /> Fonte
           </button>
@@ -484,58 +566,92 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
           <div
             className="h-full bg-emerald-400 transition-all"
-            style={{ width: `${total ? Math.round((unlockedCount / total) * 100) : 0}%` }}
+            style={{ width: `${completionPercent}%` }}
           />
         </div>
       )}
 
+      {ready && total > 0 && (
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          {ACHIEVEMENT_FILTERS.map((item) => {
+            const count =
+              item.id === 'all'
+                ? total
+                : detail.achievements.filter((achievement) => achievement.category === item.id).length
+            if (count === 0) return null
+            const Icon = item.icon
+            const active = filter === item.id
+            return (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => setFilter(item.id)}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold transition ${
+                  active
+                    ? 'border-accent/50 bg-accent/15 text-accent'
+                    : 'border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/[0.07] hover:text-slate-200'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {item.label}
+                <span className="rounded bg-black/25 px-1.5 py-0.5 text-[10px] text-slate-300">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {ready ? (
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-          {detail.achievements.map((achievement) => {
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          {visibleAchievements.map((achievement) => {
             const done = !!unlocked[achievement.id]
             return (
               <button
                 type="button"
                 key={achievement.id}
                 onClick={() => void toggle(achievement.id)}
-                className={`flex gap-3 rounded-lg p-2 text-left transition ${
+                className={`group flex min-h-[104px] gap-3 rounded-lg p-3 text-left transition ${
                   done
-                    ? 'border border-emerald-400/40 bg-emerald-400/10'
-                    : 'border border-white/5 bg-white/[0.04] hover:bg-white/[0.07]'
+                    ? 'border border-emerald-400/45 bg-emerald-400/10 shadow-[0_0_28px_rgb(52_211_153_/_0.08)]'
+                    : 'border border-white/5 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.07]'
                 }`}
               >
-                <div className="h-11 w-11 shrink-0 overflow-hidden rounded bg-white/5 relative">
-                  {achievement.icon ? (
-                    <img
-                      src={achievement.icon}
-                      alt={achievement.title}
-                      className={`h-full w-full object-cover ${done ? '' : 'grayscale opacity-60'}`}
-                    />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center text-slate-500">
-                      <Award className="w-5 h-5" />
-                    </div>
-                  )}
-                  {done && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-emerald-500/30">
-                      <Check className="w-5 h-5 text-emerald-100" />
-                    </div>
-                  )}
-                </div>
+                <AchievementBadge achievement={achievement} done={done} />
                 <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-semibold truncate ${done ? 'text-emerald-200' : ''}`}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={categoryClassName(achievement)}>
+                      {categoryLabel(achievement)}
+                    </span>
+                    {achievement.tier && (
+                      <span className={tierClassName(achievement.tier)}>{tierLabel(achievement.tier)}</span>
+                    )}
+                    {achievement.checklistTotal && (
+                      <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-300">
+                        checklist {achievement.checklistTotal}
+                      </span>
+                    )}
+                  </div>
+                  <div className={`mt-1 text-base font-semibold leading-tight ${done ? 'text-emerald-100' : 'text-white'}`}>
                     {achievement.title}
                   </div>
                   {achievement.description && (
-                    <div className="text-[11px] text-slate-500 line-clamp-2">
+                    <div className="mt-1 text-xs leading-snug text-slate-400 line-clamp-2">
                       {achievement.description}
                     </div>
                   )}
-                  {done && unlocked[achievement.id] && (
-                    <div className="mt-0.5 text-[10px] text-emerald-300/80">
-                      Marcada {new Date(unlocked[achievement.id]).toLocaleDateString()}
-                    </div>
-                  )}
+                  <div className="mt-2 flex items-center gap-2 text-[11px]">
+                    {done && unlocked[achievement.id] ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-300/90">
+                        <Check className="h-3 w-3" />
+                        Marcada {new Date(unlocked[achievement.id]).toLocaleDateString()}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-slate-500">
+                        <Lock className="h-3 w-3" />
+                        Pendente
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             )
@@ -548,6 +664,91 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
       )}
     </section>
   )
+}
+
+function AchievementStat({
+  icon,
+  label,
+  value
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+}): JSX.Element {
+  return (
+    <div className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-2">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+        {icon}
+        {label}
+      </div>
+      <div className="mt-1 font-display text-lg font-semibold text-white">{value}</div>
+    </div>
+  )
+}
+
+function AchievementBadge({
+  achievement,
+  done
+}: {
+  achievement: AchievementDefinition
+  done: boolean
+}): JSX.Element {
+  const category = achievement.category ?? 'milestone'
+  const meta = ACHIEVEMENT_CATEGORY_META[category]
+  const Icon = meta.icon
+  return (
+    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/5">
+      {achievement.icon ? (
+        <img
+          src={achievement.icon}
+          alt={achievement.title}
+          className={`h-full w-full object-cover ${done ? '' : 'grayscale opacity-55'}`}
+        />
+      ) : (
+        <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${meta.tile}`}>
+          <Icon className={`h-8 w-8 ${done ? 'text-white' : 'text-white/55'}`} />
+        </div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/70 to-transparent" />
+      {done && (
+        <div className="absolute inset-0 flex items-center justify-center bg-emerald-500/25">
+          <div className="rounded-full bg-emerald-400 p-1 text-slate-950 shadow-lg shadow-emerald-500/30">
+            <Check className="h-4 w-4" />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function categoryLabel(achievement: AchievementDefinition): string {
+  return ACHIEVEMENT_CATEGORY_META[achievement.category ?? 'milestone'].label
+}
+
+function categoryClassName(achievement: AchievementDefinition): string {
+  return `rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ACHIEVEMENT_CATEGORY_META[achievement.category ?? 'milestone'].tone}`
+}
+
+function tierLabel(tier: NonNullable<AchievementDefinition['tier']>): string {
+  const labels: Record<NonNullable<AchievementDefinition['tier']>, string> = {
+    bronze: 'bronze',
+    silver: 'prata',
+    gold: 'ouro',
+    platinum: 'platina',
+    gamehub: 'GameHub'
+  }
+  return labels[tier]
+}
+
+function tierClassName(tier: NonNullable<AchievementDefinition['tier']>): string {
+  const tones: Record<NonNullable<AchievementDefinition['tier']>, string> = {
+    bronze: 'border-orange-300/20 bg-orange-400/10 text-orange-200',
+    silver: 'border-slate-300/20 bg-slate-300/10 text-slate-200',
+    gold: 'border-yellow-300/25 bg-yellow-400/10 text-yellow-200',
+    platinum: 'border-cyan-200/30 bg-cyan-300/10 text-cyan-100',
+    gamehub: 'border-accent/30 bg-accent/10 text-accent'
+  }
+  return `rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${tones[tier]}`
 }
 
 function JourneyTrackerPanel({

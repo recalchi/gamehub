@@ -20,10 +20,26 @@ if (!existsSync(unpackedDir)) {
 if (existsSync(zipPath)) rmSync(zipPath, { force: true })
 if (existsSync(versionedZipPath)) rmSync(versionedZipPath, { force: true })
 
-// Use native tar.exe (Windows 10/11) to avoid extra NPM deps.
-// `--force-local` is required because tar otherwise treats `D:\path\file.zip`
-// as a `host:path` remote URI and tries to ssh to "D:".
-execFileSync('tar', ['--force-local', '-a', '-c', '-f', zipPath, '-C', unpackedDir, '.'], {
+const compressScript = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$source = $env:GAMEHUB_PORTABLE_SOURCE
+$destination = $env:GAMEHUB_PORTABLE_ZIP
+if (-not $source -or -not $destination) {
+  throw 'GAMEHUB_PORTABLE_SOURCE and GAMEHUB_PORTABLE_ZIP are required.'
+}
+if (Test-Path -LiteralPath $destination) {
+  Remove-Item -LiteralPath $destination -Force
+}
+[System.IO.Compression.ZipFile]::CreateFromDirectory($source, $destination, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+`
+
+execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', compressScript], {
+  env: {
+    ...process.env,
+    GAMEHUB_PORTABLE_SOURCE: unpackedDir,
+    GAMEHUB_PORTABLE_ZIP: zipPath
+  },
   stdio: 'inherit'
 })
 

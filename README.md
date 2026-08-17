@@ -16,7 +16,7 @@ GameHub is a Windows desktop app built with Electron, React, TypeScript, and Tai
 - `npm run typecheck` TypeScript checks
 - `npm run build` production build
 - `npm test -- --run` Vitest suite
-- `npm audit fix` applied; remaining audit item is the React Router v6 -> v7 major migration
+- `npm audit` clean after dependency security refresh
 
 ## ⚡ Why GameHub auto-elevates to administrator
 
@@ -212,7 +212,7 @@ Validado nesta versao:
 - `npm run typecheck` OK
 - `npm run build` OK
 - `npm test -- --run` OK
-- `npm audit fix` aplicado; pendencia restante: migracao major `react-router-dom` v6 -> v7
+- `npm audit` OK
 
 <a id="pt-roadmap-proximas-melhorias"></a>
 
@@ -230,7 +230,7 @@ Validado nesta versao:
    - filtros discretos avancados
    - organizacao de cards por qualidade de metadata
 8. Telemetria local opt-in para diagnostico de launch failures
-9. Migrar `react-router-dom` v6 -> v7 para encerrar as pendencias moderadas restantes do `npm audit`
+9. Avaliar migracoes maiores de stack visual/build (React 19, Tailwind 4, TypeScript 7, Vite 8) em uma rodada dedicada de compatibilidade
 
 ---
 
@@ -367,7 +367,7 @@ Validated for this version:
 - `npm run typecheck` OK
 - `npm run build` OK
 - `npm test -- --run` OK
-- `npm audit fix` applied; remaining item: `react-router-dom` v6 -> v7 major migration
+- `npm audit` OK
 
 <a id="en-roadmap-next-updates"></a>
 
@@ -385,7 +385,7 @@ Validated for this version:
    - advanced discreet filters
    - metadata quality organization
 8. Opt-in local telemetry for launch failure diagnostics
-9. Migrate `react-router-dom` v6 -> v7 to close the remaining moderate `npm audit` items
+9. Evaluate larger visual/build stack migrations (React 19, Tailwind 4, TypeScript 7, Vite 8) in a dedicated compatibility pass
 
 ---
 

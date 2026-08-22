@@ -2,10 +2,24 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import RouteTransition from '../components/RouteTransition'
 import { Link } from 'react-router-dom'
-import { Award, CheckCircle2, Download, ExternalLink, Gamepad2, Loader2, Search, ShieldQuestion } from 'lucide-react'
+import {
+  Award,
+  CheckCircle2,
+  Crown,
+  Download,
+  ExternalLink,
+  Gamepad2,
+  ListChecks,
+  Loader2,
+  Search,
+  ShieldQuestion,
+  Sparkles,
+  Swords
+} from 'lucide-react'
 import { PLATFORMS } from '@shared/platforms'
-import type { GameAchievementSummary, GameJourneyRecord } from '@shared/types'
+import type { AchievementDefinition, GameAchievementDetail, GameAchievementSummary, GameJourneyRecord } from '@shared/types'
 import PageHeader from '../components/PageHeader'
+import { buildAchievementRoadmap, type AchievementRoadmap } from './achievementRoadmap'
 
 type Filter = 'all' | 'ready' | 'needs' | 'unsupported'
 
@@ -197,6 +211,7 @@ function journeyBadgeTone(status: GameJourneyRecord['status']): string {
 function AchievementSummaryCard({ item }: { item: GameAchievementSummary }): JSX.Element {
   const platform = PLATFORMS[item.platform]
   const [progress, setProgress] = useState<Record<string, string>>({})
+  const [detail, setDetail] = useState<GameAchievementDetail | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -208,8 +223,26 @@ function AchievementSummaryCard({ item }: { item: GameAchievementSummary }): JSX
     }
   }, [item.gameId])
 
+  useEffect(() => {
+    if (item.status !== 'ready') {
+      setDetail(null)
+      return
+    }
+    let alive = true
+    void window.api.achievements.game(item.gameId).then((data) => {
+      if (alive) setDetail(data)
+    })
+    return () => {
+      alive = false
+    }
+  }, [item.gameId, item.status])
+
   const done = Object.keys(progress).length
   const pct = item.total > 0 ? Math.round((done / item.total) * 100) : 0
+  const roadmap = useMemo(
+    () => (detail ? buildAchievementRoadmap(detail.achievements, progress) : null),
+    [detail, progress]
+  )
 
   return (
     <div className="glass rounded-xl overflow-hidden flex">
@@ -243,6 +276,7 @@ function AchievementSummaryCard({ item }: { item: GameAchievementSummary }): JSX
             </div>
           </div>
         )}
+        {roadmap && <AchievementRoadmapPreview roadmap={roadmap} />}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="rounded bg-white/5 px-2 py-1 text-xs text-slate-300">
             {item.total > 0 ? `${item.total} conquistas` : 'Sem lista local'}
@@ -266,6 +300,72 @@ function AchievementSummaryCard({ item }: { item: GameAchievementSummary }): JSX
       </div>
     </div>
   )
+}
+
+function AchievementRoadmapPreview({ roadmap }: { roadmap: AchievementRoadmap }): JSX.Element {
+  const next = roadmap.next.slice(0, 3)
+
+  return (
+    <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+          <ListChecks className="h-3.5 w-3.5 text-accent" />
+          Roteiro
+        </div>
+        <span className="text-[11px] font-semibold text-slate-400">
+          {roadmap.pending} pendente{roadmap.pending === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {roadmap.categories.slice(0, 4).map((category) => (
+          <div key={category.id} className="min-w-0">
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
+              <span className="inline-flex min-w-0 items-center gap-1 text-slate-400">
+                {categoryIcon(category.id)}
+                <span className="truncate">{category.label}</span>
+              </span>
+              <span className="shrink-0 text-slate-500">
+                {category.unlocked}/{category.total}
+              </span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-white/5">
+              <div className="h-full bg-accent" style={{ width: `${category.percent}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {next.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {next.map((achievement) => (
+            <span
+              key={achievement.id}
+              className="inline-flex max-w-full items-center gap-1 rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300"
+              title={achievement.title}
+            >
+              {achievementIcon(achievement)}
+              <span className="truncate">{achievement.title}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function categoryIcon(category: AchievementRoadmap['categories'][number]['id']): JSX.Element {
+  if (category === 'boss') return <Swords className="h-3 w-3 text-rose-300" />
+  if (category === 'ending') return <Crown className="h-3 w-3 text-amber-300" />
+  if (category === 'collection') return <Sparkles className="h-3 w-3 text-violet-300" />
+  return <Award className="h-3 w-3 text-slate-400" />
+}
+
+function achievementIcon(achievement: AchievementDefinition): JSX.Element {
+  if (achievement.category === 'boss') return <Swords className="h-3 w-3 text-rose-300" />
+  if (achievement.category === 'ending') return <Crown className="h-3 w-3 text-amber-300" />
+  if (achievement.source === 'gamehub') return <Sparkles className="h-3 w-3 text-accent" />
+  return <Award className="h-3 w-3 text-slate-400" />
 }
 
 function StatusBadge({ status }: { status: GameAchievementSummary['status'] }): JSX.Element {

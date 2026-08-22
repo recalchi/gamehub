@@ -70,6 +70,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   async scan(opts) {
     set({ progress: { phase: 'enumerating', scanned: 0, found: 0 } })
     const result = await window.api.library.scan(opts)
+    if (result.errors.includes('scan already in progress')) {
+      const current = get()
+      set({
+        lastScan: {
+          ...result,
+          games: current.games,
+          emulators: current.emulators
+        },
+        progress: { phase: 'done', scanned: current.games.length, found: current.games.length }
+      })
+      return {
+        ...result,
+        games: current.games,
+        emulators: current.emulators
+      }
+    }
     set({
       games: result.games,
       emulators: result.emulators,

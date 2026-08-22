@@ -9,6 +9,7 @@ import {
   playSplashBoot,
   playSplashLogo
 } from '../audio/engine'
+import { planSplashBoot } from './splashBoot'
 import type { LogEntry } from '@shared/types'
 
 /**
@@ -24,12 +25,8 @@ import type { LogEntry } from '@shared/types'
  * second context that fails autoplay independently.
  */
 const MIN_DISPLAY_MS = 1400 // floor — splash never feels rushed
-const HARD_TIMEOUT_MS = 22000 // ceiling — never block beyond this
+const HARD_TIMEOUT_MS = 12000 // ceiling — never block beyond this
 const LOGO_DISPLAY_MS = 1200
-// Pre-warm covers for this many recently-played games before letting the
-// user reach Home. Trade-off: ~1-2s extra splash, but Home renders with
-// art already in place instead of placeholders fading in afterward.
-const PRIORITY_COVER_COUNT = 10
 
 type Status =
   | { kind: 'init'; label: string }
@@ -48,7 +45,6 @@ const BOOT_LINES = [
 export default function Splash(): JSX.Element {
   const navigate = useNavigate()
   const initStore = useLibraryStore((s) => s.init)
-  const scan = useLibraryStore((s) => s.scan)
   const progress = useLibraryStore((s) => s.progress)
   const settings = useLibraryStore((s) => s.settings)
   const [status, setStatus] = useState<Status>({ kind: 'init', label: 'Inicializando sistema' })
@@ -188,31 +184,9 @@ export default function Splash(): JSX.Element {
         await initStore()
         if (cancelled) return
 
-        // Race the filesystem scan against a 4s deadline. If the drive is
-        // fast and library is small, scan wins → Home renders complete.
-        // If scan exceeds 4s (large library / slow disk), we give up and
-        // let it finish in the background; the ScanBanner on Home shows
-        // progress while the user can already navigate.
-        setStatus({ kind: 'init', label: 'Sincronizando catálogo' })
-        const scanPromise = scan({ fresh: false }).catch((err: unknown) => {
-          window.api.system.log('warn', 'splash', `scan rejected: ${String(err)}`)
-          return null
-        })
-        const scanDeadline = new Promise((r) => setTimeout(r, 4000))
-        await Promise.race([scanPromise, scanDeadline])
-        if (cancelled) return
-
-        // Warm covers for the visible-on-Home games. Library may be from
-        // either the just-finished scan or the on-disk snapshot — both work
-        // for prioritisation.
-        setStatus({ kind: 'init', label: 'Carregando capas dos jogos recentes' })
-        const data = await window.api.library.list()
-        const recents = pickHomePriorityGames(data.games, PRIORITY_COVER_COUNT)
-        if (recents.length > 0) {
-          const enrichPromise = window.api.library.enrichGames(recents)
-          const timeout = new Promise((r) => setTimeout(r, 1200))
-          await Promise.race([enrichPromise, timeout])
-        }
+        const plan = planSplashBoot(useLibraryStore.getState().games.length)
+        setStatus({ kind: 'init', label: plan.statusLabel })
+        setBootProgress(plan.progress)
         if (cancelled) return
 
         const elapsed = Date.now() - tStart
@@ -222,10 +196,7 @@ export default function Splash(): JSX.Element {
 
         setStatus({ kind: 'ready', label: 'Sistema pronto' })
         await new Promise((r) => setTimeout(r, 220))
-        // No second scan needed — the race above already kicked one off.
-        // If it didn't finish in 4s, it's still running in the main process
-        // and the renderer's ScanBanner will surface progress live.
-        if (!cancelled) goHome('boot-complete')
+        if (!cancelled) goHome(plan.navigationReason)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         window.api?.system?.log?.('error', 'splash', `boot failed: ${msg}`)
@@ -511,29 +482,6 @@ function LogoIntro(): JSX.Element {
       </motion.div>
     </motion.div>
   )
-}
-
-/**
- * Pick the games that need their covers warmed before Home is shown.
- * Order: recently-played → favorited → first N ready games.
- */
-function pickHomePriorityGames(games: import('@shared/types').Game[], limit: number): string[] {
-  const pool: import('@shared/types').Game[] = []
-  const seen = new Set<string>()
-  const add = (g: import('@shared/types').Game): void => {
-    if (g.cover) return // already cached, no fetch needed
-    if (seen.has(g.id)) return
-    seen.add(g.id)
-    pool.push(g)
-  }
-  for (const g of [...games].sort((a, b) =>
-    (b.lastPlayedAt ?? '').localeCompare(a.lastPlayedAt ?? '')
-  )) {
-    if (g.lastPlayedAt) add(g)
-  }
-  for (const g of games) if (g.favorite) add(g)
-  for (const g of games) if (g.status === 'ready') add(g)
-  return pool.slice(0, limit).map((g) => g.id)
 }
 
 function labelForProgress(phase: string): string {

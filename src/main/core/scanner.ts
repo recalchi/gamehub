@@ -128,7 +128,13 @@ interface ScanOptions {
 export async function scanLibrary(opts: ScanOptions): Promise<ScanResult> {
   if (scanning) {
     log.warn('scanner', 'scan requested while another scan is in progress — ignoring')
-    return { games: [], emulators: [], durationMs: 0, errors: ['scan already in progress'] }
+    const current = libraryStore.load()
+    return {
+      games: current.games,
+      emulators: current.emulators,
+      durationMs: 0,
+      errors: ['scan already in progress']
+    }
   }
   scanning = true
   const startedAt = Date.now()

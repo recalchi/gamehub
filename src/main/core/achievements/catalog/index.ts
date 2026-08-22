@@ -11,6 +11,7 @@
  */
 import type { AchievementDefinition, PlatformId } from '@shared/types'
 import { GOD_OF_WAR_CATALOG_ENTRIES } from './god-of-war'
+import { DEMON_SLAYER_CATALOG_ENTRIES } from './demon-slayer'
 
 export interface AchievementCatalogEntry {
   id: string
@@ -18,6 +19,7 @@ export interface AchievementCatalogEntry {
     titles: string[]
     steamAppId?: string
     exe?: string[]
+    pathIncludes?: string[]
   }
   platforms: PlatformId[]
   achievements: AchievementDefinition[]
@@ -126,6 +128,7 @@ export const LOCAL_ACHIEVEMENT_CATALOG: AchievementCatalogEntry[] = [
     achievements: ELDEN_RING_ACHIEVEMENTS
   },
   ...GOD_OF_WAR_CATALOG_ENTRIES,
+  ...DEMON_SLAYER_CATALOG_ENTRIES,
   {
     id: 'hollow-knight',
     matchers: {

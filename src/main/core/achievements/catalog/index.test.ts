@@ -91,3 +91,31 @@ describe('achievement catalog / God of War series', () => {
     expect(gow2hd?.achievements.filter((achievement) => achievement.source === 'local')).toHaveLength(35)
   })
 })
+
+describe('achievement catalog / Demon Slayer', () => {
+  it('maps the running Yuzu install path to the Hinokami Chronicles roadmap', () => {
+    const entry = resolveLocalCatalogEntry(
+      game(
+        'yuzu',
+        'E:\\Jogos\\PC\\Demon-Slayer-Kimetsu-no-Yaiba-SteamRIP.com (1)\\Demon Slayer - Kimetsu no Yaiba\\yuzu.exe',
+        'pc'
+      )
+    )
+
+    expect(entry?.id).toBe('demon-slayer-hinokami-chronicles')
+    expect(entry?.sourceUrl).toBe('https://steamcommunity.com/stats/1490890/achievements')
+  })
+
+  it('keeps the 47 official Steam achievements separate from GameHub goals', () => {
+    const entry = LOCAL_ACHIEVEMENT_CATALOG.find((item) => item.id === 'demon-slayer-hinokami-chronicles')
+
+    expect(entry).toBeDefined()
+    expect(entry!.achievements.filter((achievement) => achievement.source === 'steam')).toHaveLength(47)
+    expect(entry!.achievements.filter((achievement) => achievement.source === 'gamehub')).toHaveLength(4)
+    expect(entry!.achievements.at(-1)).toMatchObject({
+      id: 'dshc:gamehub-platinum-run',
+      checklistTotal: 47,
+      tier: 'gamehub'
+    })
+  })
+})

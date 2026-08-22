@@ -18,6 +18,9 @@ export function resolveLocalCatalogEntry(game: Game): AchievementCatalogEntry | 
         return entry
       }
     }
+    if (entry.matchers.pathIncludes?.some((part) => normalize(game.path).includes(normalize(part)))) {
+      return entry
+    }
     if (entry.matchers.exe?.some((e) => e.toLowerCase() === exeName)) return entry
   }
   return null

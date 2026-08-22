@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { layoutSpring } from '../motion/tokens'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -485,6 +485,8 @@ const ACHIEVEMENT_FILTERS: Array<{ id: AchievementFilter; label: string; icon: t
 function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail | null; gameId: string }): JSX.Element {
   const [unlocked, setUnlocked] = useState<Record<string, string>>({})
   const [filter, setFilter] = useState<AchievementFilter>('all')
+  const [recentUnlock, setRecentUnlock] = useState<AchievementDefinition | null>(null)
+  const toastTimer = useRef<number | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -496,10 +498,24 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
     }
   }, [gameId])
 
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    }
+  }, [])
+
   async function toggle(achievementId: string): Promise<void> {
     const isUnlocked = !!unlocked[achievementId]
     const next = await window.api.achievements.toggle(gameId, achievementId, !isUnlocked)
     setUnlocked(next)
+    if (!isUnlocked) {
+      const achievement = detail?.achievements.find((item) => item.id === achievementId)
+      if (achievement) {
+        setRecentUnlock(achievement)
+        if (toastTimer.current) window.clearTimeout(toastTimer.current)
+        toastTimer.current = window.setTimeout(() => setRecentUnlock(null), 3400)
+      }
+    }
   }
 
   if (!detail) {
@@ -522,7 +538,10 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
   const completionPercent = total ? Math.round((unlockedCount / total) * 100) : 0
 
   return (
-    <section id="achievements" className="mt-4 glass rounded-lg p-4">
+    <section id="achievements" className="relative mt-4 overflow-hidden rounded-lg border border-white/10 bg-black/25 p-4 shadow-[0_24px_80px_rgb(0_0_0_/_0.35)]">
+      <AnimatePresence>
+        {recentUnlock && <AchievementUnlockToast achievement={recentUnlock} />}
+      </AnimatePresence>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display font-semibold text-lg flex items-center gap-2">
@@ -606,13 +625,15 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
           {visibleAchievements.map((achievement) => {
             const done = !!unlocked[achievement.id]
             return (
-              <button
+              <motion.button
                 type="button"
                 key={achievement.id}
                 onClick={() => void toggle(achievement.id)}
+                layout
+                whileTap={{ scale: 0.985 }}
                 className={`group flex min-h-[104px] gap-3 rounded-lg p-3 text-left transition ${
                   done
-                    ? 'border border-emerald-400/45 bg-emerald-400/10 shadow-[0_0_28px_rgb(52_211_153_/_0.08)]'
+                    ? 'border border-sky-300/45 bg-sky-300/10 shadow-[0_0_32px_rgb(56_189_248_/_0.12)]'
                     : 'border border-white/5 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.07]'
                 }`}
               >
@@ -631,7 +652,7 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
                       </span>
                     )}
                   </div>
-                  <div className={`mt-1 text-base font-semibold leading-tight ${done ? 'text-emerald-100' : 'text-white'}`}>
+                  <div className={`mt-1 text-base font-semibold leading-tight ${done ? 'text-sky-100' : 'text-white'}`}>
                     {achievement.title}
                   </div>
                   {achievement.description && (
@@ -641,7 +662,7 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
                   )}
                   <div className="mt-2 flex items-center gap-2 text-[11px]">
                     {done && unlocked[achievement.id] ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-300/90">
+                      <span className="inline-flex items-center gap-1 text-sky-300/90">
                         <Check className="h-3 w-3" />
                         Marcada {new Date(unlocked[achievement.id]).toLocaleDateString()}
                       </span>
@@ -653,7 +674,7 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
                     )}
                   </div>
                 </div>
-              </button>
+              </motion.button>
             )
           })}
         </div>
@@ -663,6 +684,39 @@ function AchievementsPanel({ detail, gameId }: { detail: GameAchievementDetail |
         </p>
       )}
     </section>
+  )
+}
+
+function AchievementUnlockToast({ achievement }: { achievement: AchievementDefinition }): JSX.Element {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -18, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -12, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+      className="absolute right-4 top-4 z-20 w-[min(360px,calc(100%-2rem))] overflow-hidden rounded-lg border border-sky-200/30 bg-slate-950/95 shadow-[0_18px_70px_rgb(14_165_233_/_0.28)] backdrop-blur"
+    >
+      <motion.div
+        initial={{ x: '-100%' }}
+        animate={{ x: '120%' }}
+        transition={{ duration: 1.15, ease: 'easeOut' }}
+        className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/18 to-transparent"
+      />
+      <div className="relative flex items-center gap-3 p-3">
+        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-sky-200/40 bg-sky-300 text-slate-950 shadow-lg shadow-sky-500/25">
+          <Trophy className="h-6 w-6" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-sky-200">
+            Conquista desbloqueada
+          </div>
+          <div className="truncate font-display text-base font-semibold text-white">{achievement.title}</div>
+          {achievement.description && (
+            <div className="truncate text-xs text-slate-400">{achievement.description}</div>
+          )}
+        </div>
+      </div>
+    </motion.div>
   )
 }
 
@@ -711,11 +765,20 @@ function AchievementBadge({
       )}
       <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/70 to-transparent" />
       {done && (
-        <div className="absolute inset-0 flex items-center justify-center bg-emerald-500/25">
-          <div className="rounded-full bg-emerald-400 p-1 text-slate-950 shadow-lg shadow-emerald-500/30">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.82 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="absolute inset-0 flex items-center justify-center bg-sky-500/25"
+        >
+          <motion.div
+            initial={{ scale: 0.7 }}
+            animate={{ scale: [0.92, 1.12, 1] }}
+            transition={{ duration: 0.44, ease: 'easeOut' }}
+            className="rounded-full bg-sky-300 p-1 text-slate-950 shadow-lg shadow-sky-500/30"
+          >
             <Check className="h-4 w-4" />
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
     </div>
   )

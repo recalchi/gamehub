@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LOCAL_ACHIEVEMENT_CATALOG } from './index'
+import { resolveLocalCatalogEntry } from '../local-catalog'
+import type { Game, PlatformId } from '@shared/types'
 
 const eldenRing = LOCAL_ACHIEVEMENT_CATALOG.find((entry) => entry.id === 'elden-ring')
 
@@ -39,5 +41,53 @@ describe('achievement catalog / Elden Ring', () => {
       category: 'milestone',
       source: 'gamehub'
     })
+  })
+})
+
+function game(title: string, path: string, platform: PlatformId): Game {
+  return {
+    id: `${platform}:${title}`,
+    title,
+    path,
+    platform,
+    sizeBytes: 0,
+    confidence: 1,
+    status: 'ready',
+    addedAt: '2026-08-22T00:00:00.000Z',
+    playTime: 0,
+    favorite: false,
+    flags: [],
+    relatedFiles: []
+  }
+}
+
+describe('achievement catalog / God of War series', () => {
+  it('covers every God of War title currently identified in the local library', () => {
+    expect(LOCAL_ACHIEVEMENT_CATALOG.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['god-of-war-ps2', 'god-of-war-ii-ps2', 'god-of-war-ii-hd', 'god-of-war-2018'])
+    )
+  })
+
+  it('maps GoW.exe to the 37-item Steam achievement set for God of War 2018', () => {
+    const entry = resolveLocalCatalogEntry(game('GoW', 'E:\\Jogos\\PC\\God-of-War\\GodOfWar\\GoW.exe', 'pc'))
+
+    expect(entry?.id).toBe('god-of-war-2018')
+    expect(entry?.achievements.filter((achievement) => achievement.source === 'steam')).toHaveLength(37)
+    expect(entry?.achievements.at(-1)).toMatchObject({
+      id: 'gow2018:father-and-son',
+      tier: 'platinum'
+    })
+  })
+
+  it('keeps PS2 originals as GameHub goals and HD remasters as local trophy roadmaps', () => {
+    const gow = resolveLocalCatalogEntry(game('God of War', 'D:\\Jogos\\PS2\\God of War.iso', 'ps2'))
+    const gow2 = resolveLocalCatalogEntry(game('God of War II', 'D:\\Jogos\\PS2\\SLUS-21361 (1.00).iso', 'ps2'))
+    const gow2hd = resolveLocalCatalogEntry(
+      game('God of War II HD', 'D:\\Jogos\\PS3\\God of War II HD (USA)\\game.pkg', 'ps3')
+    )
+
+    expect(gow?.achievements.every((achievement) => achievement.source === 'gamehub')).toBe(true)
+    expect(gow2?.achievements.some((achievement) => achievement.id === 'gow2:gamehub-ps2-platinum-run')).toBe(true)
+    expect(gow2hd?.achievements.filter((achievement) => achievement.source === 'local')).toHaveLength(35)
   })
 })

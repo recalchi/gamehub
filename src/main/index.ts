@@ -20,6 +20,7 @@ import { installEmulator } from './core/autoInstall'
 import { detectEmulators } from './core/emulators'
 import { boundsForDisplay } from './core/windowing'
 import { initAutoUpdater } from './core/updater'
+import { resolveRendererTarget } from './core/rendererTarget'
 import { CURATED_CATALOG } from '@shared/curated'
 import { EMULATORS } from '@shared/emulators'
 import type { EmulatorId } from '@shared/types'
@@ -30,7 +31,8 @@ import { createReadStream, readFileSync, writeFileSync, unlinkSync, existsSync, 
 import { Readable } from 'node:stream'
 import ffmpegStatic from 'ffmpeg-static'
 
-const isDev = !!process.env.ELECTRON_RENDERER_URL
+const rendererTarget = resolveRendererTarget()
+const isDev = rendererTarget.type === 'url'
 const isMediaPlaybackSmoke = process.argv.includes('--smoke-media-playback')
 
 // Brand the processes — without this, Windows Task Manager shows "Electron"
@@ -532,8 +534,8 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
-  if (isDev) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL!)
+  if (rendererTarget.type === 'url') {
+    win.loadURL(rendererTarget.value)
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))

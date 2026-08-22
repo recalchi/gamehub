@@ -10,6 +10,7 @@
  * possible — we cite the source in the entry so anyone can verify.
  */
 import type { AchievementDefinition, PlatformId } from '@shared/types'
+import { GOD_OF_WAR_CATALOG_ENTRIES } from './god-of-war'
 
 export interface AchievementCatalogEntry {
   id: string
@@ -124,6 +125,7 @@ export const LOCAL_ACHIEVEMENT_CATALOG: AchievementCatalogEntry[] = [
     sourceUrl: 'https://steamcommunity.com/stats/1245620/achievements',
     achievements: ELDEN_RING_ACHIEVEMENTS
   },
+  ...GOD_OF_WAR_CATALOG_ENTRIES,
   {
     id: 'hollow-knight',
     matchers: {
